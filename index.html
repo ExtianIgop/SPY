@@ -112,9 +112,10 @@ const WORDS = [
   "Paliparan","Palengke","Simbahan","Paaralan","Ospital","Restawran","Dalampasigan","Sinehan",
   "Estasyon ng Tren","Bangko","Botika","Barberya","Bahay Kubo","Sari-Sari Store",
   "Terminal ng Jeepney","Palaisdaan","Plasa ng Bayan","Barangay Hall","Videoke Bar","Talipapa",
-  "Casino","Cruise Ship","Space Station","Submarine","Military Base","Movie Studio",
-  "Art Museum","Ski Resort","Pirate Ship","Wedding Venue"
-]; // Rough Tagalog translations -- worth a native-speaker double check before relying on them.
+  "Mall","Terminal ng Bus","Beauty Parlor","Computer Shop","Laundry Shop",
+  "Basketball Court","Karinderya","Tricycle Terminal","Bahay ni Lola","Palaruan",
+  "Casino","Cruise Ship","Space Station","Submarine","Pirate Ship"
+]; // Rough Tagalog/Taglish translations -- worth a native-speaker double check before relying on them.
 
 // Shown only to the mole: one decoy word that shares a loose vibe or theme
 // with the real word (crowded, watery, formal, a vessel, etc.) but is a
@@ -128,10 +129,12 @@ const NEAR_MISS = {
   "Bahay Kubo":"Palaisdaan", "Sari-Sari Store":"Talipapa", "Terminal ng Jeepney":"Estasyon ng Tren",
   "Palaisdaan":"Dalampasigan", "Plasa ng Bayan":"Barangay Hall", "Barangay Hall":"Simbahan",
   "Videoke Bar":"Palengke", "Talipapa":"Sari-Sari Store",
+  "Mall":"Palengke", "Terminal ng Bus":"Terminal ng Jeepney", "Beauty Parlor":"Barberya",
+  "Computer Shop":"Videoke Bar", "Laundry Shop":"Sari-Sari Store",
+  "Basketball Court":"Palaruan", "Karinderya":"Sari-Sari Store", "Tricycle Terminal":"Estasyon ng Tren",
+  "Bahay ni Lola":"Barangay Hall", "Palaruan":"Basketball Court",
   "Casino":"Nightclub", "Cruise Ship":"Submarine", "Space Station":"Submarine",
-  "Submarine":"Cruise Ship", "Military Base":"Police Academy", "Movie Studio":"Art Museum",
-  "Art Museum":"Movie Studio", "Ski Resort":"Beach Resort", "Pirate Ship":"Cruise Ship",
-  "Wedding Venue":"Casino"
+  "Submarine":"Cruise Ship", "Pirate Ship":"Cruise Ship"
 };
 
 function genId(){return Math.random().toString(36).slice(2,10)+Date.now().toString(36).slice(-4);}
@@ -378,6 +381,7 @@ async function sendChatMessage(text){
 }
 
 const TURN_LIMIT_MS = 15000;
+const VOTE_LIMIT_MS = 30000;
 let skipInFlight = false;
 
 async function skipTurnIfExpired(g){
@@ -463,7 +467,9 @@ async function tick(){
     const roundVotes = (g.votes && g.votes[g.round]) || {};
     const entries = Object.values(roundVotes);
     state.votesCount = entries.length;
-    if(state.isHost && g.players && entries.length>=g.players.length && g.players.length>0){
+    const allVoted = g.players && entries.length>=g.players.length && g.players.length>0;
+    const timedOut = g.votingStartTime && (Date.now()-g.votingStartTime) >= VOTE_LIMIT_MS;
+    if(state.isHost && (allVoted || timedOut)){
       lastGameSnapshot=snapshot; await revealResults(); return;
     }
   }
@@ -496,6 +502,15 @@ setInterval(()=>{
       turnEl.style.color = turnRemain<=5 ? 'var(--redacted-2)' : 'var(--gold)';
     }
     skipTurnIfExpired(state.game);
+  }
+  if(state.screen==='voting' && state.game && state.game.votingStartTime){
+    const voteEl = document.getElementById('voteClock');
+    if(voteEl){
+      const voteRemain = Math.max(0, Math.ceil((state.game.votingStartTime + VOTE_LIMIT_MS - Date.now())/1000));
+      voteEl.textContent = voteRemain + 's';
+      voteEl.style.color = voteRemain<=5 ? 'var(--redacted-2)' : 'var(--gold)';
+      if(voteRemain<=0 && state.isHost){ revealResults(); }
+    }
   }
 },1000);
 
@@ -704,12 +719,14 @@ function render(){
     const g = state.game;
     const others = g.players.filter(p=>p.id!==myId);
     const alreadyVoted = state.votedRound===g.round;
+    const voteRemainInit = g.votingStartTime ? Math.max(0, Math.ceil((g.votingStartTime + VOTE_LIMIT_MS - Date.now())/1000)) : 30;
+    const clockRow = `<div class="row" style="align-items:baseline;margin-bottom:2px;"><div class="sub" style="margin-bottom:0;">${state.votesCount}/${g.players.length} agents have voted.</div><span id="voteClock" style="flex:0 0 auto;font-family:var(--stamp);font-size:15px;color:var(--gold);">${voteRemainInit}s</span></div>`;
 
     if(alreadyVoted){
       html += `
         <div class="eyebrow">Case File ${esc(state.code)} &middot; Round ${g.round}</div>
         <h1 class="title" style="font-size:24px;">Vote Locked In</h1>
-        <div class="sub">${state.votesCount}/${g.players.length} agents have voted.</div>
+        ${clockRow}
         <div class="card center" style="padding:30px 20px;">
           <div class="hint" style="font-size:14px;color:var(--paper);">Waiting for the rest of the table&hellip;</div>
         </div>
@@ -719,7 +736,8 @@ function render(){
       html += `
         <div class="eyebrow">Case File ${esc(state.code)} &middot; Round ${g.round}</div>
         <h1 class="title" style="font-size:24px;">Name the Mole</h1>
-        <div class="sub">${state.votesCount}/${g.players.length} agents have voted.</div>
+        ${clockRow}
+        <div class="hint" style="margin-bottom:14px;">If the clock runs out, whoever has the most votes so far wins the round — and if no one's voted at all, the mole wins by default.</div>
         ${renderChatHistory(g)}
         <div class="card">
           <label>Cast Your Suspicion</label>
@@ -738,8 +756,10 @@ function render(){
     let maxVotes = 0;
     Object.values(tally).forEach(v=>{ if(v>maxVotes) maxVotes=v; });
     const topSuspects = Object.keys(tally).filter(id=>tally[id]===maxVotes && maxVotes>0);
-    const caught = maxVotes>0 && topSuspects.length===1 && topSuspects[0]===g.spyId;
+    const noVotes = maxVotes===0;
+    const caught = !noVotes && topSuspects.length===1 && topSuspects[0]===g.spyId;
     const spyName = (g.players.find(p=>p.id===g.spyId)||{}).name || 'Unknown';
+    const verdictText = noVotes ? 'MOLE WINS — NO ONE VOTED' : caught ? 'MOLE CAUGHT' : 'MOLE ESCAPED';
     html += `
       <div class="eyebrow">Case File ${esc(state.code)} &middot; Round ${g.round}</div>
       <h1 class="title" style="font-size:24px;">Verdict</h1>
@@ -750,7 +770,8 @@ function render(){
           <div class="word-big">${esc(g.word)}</div>
           <div class="role-label" style="margin-top:14px;">The mole was</div>
           <div class="word-big mole-word">${esc(spyName)}</div>
-          <div class="verdict ${caught?'win':'lose'}">${maxVotes===0?'No votes cast':caught?'MOLE CAUGHT':'MOLE ESCAPED'}</div>
+          <div class="verdict ${caught?'win':'lose'}">${verdictText}</div>
+          ${noVotes ? `<div class="hint" style="margin-top:6px;">Time ran out before anyone cast a vote.</div>` : ''}
         </div>
       </div>
       <div class="card">
