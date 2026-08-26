@@ -92,22 +92,14 @@
 <script>
 /* =========================================================
    GITHUB CONFIG — REPLACE BEFORE HOSTING
-   1. Create a throwaway repo just for this game (not a real project repo).
-   2. GitHub.com -> Settings -> Developer settings -> Personal access tokens
-      -> Fine-grained tokens -> Generate new token.
-      Scope it to ONLY that one repo, permission: Contents = Read and write.
-   3. Fill in the four values below.
-   NOTE: this token will be visible to anyone who opens dev tools on the
-   hosted page. Only use a token scoped to this one throwaway repo, and
-   revoke it once you're done playing.
+   Credentials are now entered on the page itself when you open it -- NOT
+   hardcoded here. That's on purpose: a real token committed into a public
+   repo gets auto-revoked by GitHub's secret scanning within minutes. Typing
+   it in at runtime means it only ever lives in your browser tab's memory,
+   never in git history.
    ========================================================= */
-const GITHUB_OWNER  = "ExtianIgop";
-const GITHUB_REPO   = "SPY";
-const GITHUB_BRANCH = "main";
-const GITHUB_TOKEN  = "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";
 
-const NOT_CONFIGURED = !GITHUB_TOKEN || GITHUB_TOKEN.length < 20;
-const API_BASE = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/`;
+let gh = null; // {owner, repo, branch, token} -- set via the Connect screen, never persisted
 
 const WORDS = ["Airport","Bank","Beach Resort","Casino","Circus Tent","Corporate Office","Cathedral","Embassy",
 "Hospital","Hotel Lobby","Military Base","Movie Studio","Cruise Ship","Passenger Train","Pirate Ship",
@@ -120,11 +112,12 @@ function fmtClock(ms){ if(ms<0)ms=0; const s=Math.floor(ms/1000); const m=Math.f
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function b64EncodeUnicode(str){ return btoa(unescape(encodeURIComponent(str))); }
 function b64DecodeUnicode(str){ return decodeURIComponent(escape(atob(str.replace(/\n/g,'')))); }
+function apiBase(){ return `https://api.github.com/repos/${gh.owner}/${gh.repo}/contents/`; }
 
 /* ---------- GitHub Contents API helpers ---------- */
 async function ghGetFile(path){
-  const res = await fetch(API_BASE+path+`?ref=${GITHUB_BRANCH}&t=${Date.now()}`, {
-    headers: { Authorization: `Bearer ${GITHUB_TOKEN}`, Accept: 'application/vnd.github+json' }
+  const res = await fetch(apiBase()+path+`?ref=${gh.branch}&t=${Date.now()}`, {
+    headers: { Authorization: `Bearer ${gh.token}`, Accept: 'application/vnd.github+json' }
   });
   if(res.status===404) return {json:null, sha:null};
   if(!res.ok) throw new Error('GitHub API error '+res.status+': '+(await res.text()).slice(0,200));
@@ -136,12 +129,12 @@ async function ghPutFile(path, obj, sha, message){
   const body = {
     message: message || ('update '+path),
     content: b64EncodeUnicode(JSON.stringify(obj)),
-    branch: GITHUB_BRANCH
+    branch: gh.branch
   };
   if(sha) body.sha = sha;
-  const res = await fetch(API_BASE+path, {
+  const res = await fetch(apiBase()+path, {
     method:'PUT',
-    headers: { Authorization: `Bearer ${GITHUB_TOKEN}`, Accept:'application/vnd.github+json', 'Content-Type':'application/json' },
+    headers: { Authorization: `Bearer ${gh.token}`, Accept:'application/vnd.github+json', 'Content-Type':'application/json' },
     body: JSON.stringify(body)
   });
   if(res.status===409){ const e=new Error('conflict'); e.conflict=true; throw e; }
@@ -175,7 +168,7 @@ const roomPath = code => `data/room-${code}.json`;
 /* ---------- state ---------- */
 const myId = genId();
 let state = {
-  screen:'home', name:'', code:'', isHost:false, discussionMinutes:5,
+  screen:'connect', name:'', code:'', isHost:false, discussionMinutes:5,
   game:null, roster:[], revealed:false, myVote:null, votesCount:0, toast:null
 };
 let tallyCache = {tally:{}, total:0};
@@ -316,7 +309,7 @@ function enterRoundScreen(g){
 
 /* ---------- polling ---------- */
 async function tick(){
-  if(state.screen==='home' || !state.code) return;
+  if(state.screen==='home' || state.screen==='connect' || !state.code) return;
   let g;
   try{ const r = await ghGetFile(roomPath(state.code)); g = r.json; }
   catch(e){ setToast('Lost contact with GitHub: '+e.message); return; }
@@ -371,29 +364,39 @@ setInterval(()=>{
 function render(){
   const app = document.getElementById('app');
 
-  if(NOT_CONFIGURED){
-    app.innerHTML = `
-      <div class="eyebrow">Setup required</div>
-      <h1 class="title" style="font-size:24px;">Connect GitHub first</h1>
-      <div class="sub">This copy isn't wired up to a repo yet, so case files can't be saved. Do this once, then re-host the file:</div>
-      <div class="card">
-        <ol class="setup">
-          <li>Create a small, throwaway repo just for this game — not a real project repo, since every action creates a commit.</li>
-          <li>On GitHub.com: <b>Settings &rarr; Developer settings &rarr; Personal access tokens &rarr; Fine-grained tokens &rarr; Generate new token.</b></li>
-          <li>Scope it to <b>only that one repo</b>, with permission <b>Contents: Read and write</b>. Nothing else.</li>
-          <li>Paste your username, repo name, and token into the constants near the top of this file's script.</li>
-          <li>Re-upload/host the file. It'll work across every laptop from then on.</li>
-        </ol>
-      </div>
-      <div class="hint">This token will be visible to anyone who opens dev tools on the hosted page. Keep it scoped to the throwaway repo, and revoke it once you're done playing.</div>
-    `;
-    return;
-  }
-
   let html = '';
   if(state.toast) html += `<div class="toast">${esc(state.toast)}</div>`;
 
-  if(state.screen==='home'){
+  if(state.screen==='connect'){
+    html += `
+      <div class="eyebrow">Classified &middot; Field Exercise</div>
+      <h1 class="title" style="font-size:24px;">Connect to your repo</h1>
+      <div class="sub">Every laptop enters these once per session. It's kept only in this browser tab's memory and is never written to any file or commit.</div>
+      <div class="card stack">
+        <div>
+          <label>GitHub username</label>
+          <input type="text" id="ghOwner" placeholder="e.g. ExtianIgop" value="${esc(state.ghOwner||'')}">
+        </div>
+        <div>
+          <label>Repository name</label>
+          <input type="text" id="ghRepo" placeholder="e.g. SPY" value="${esc(state.ghRepo||'')}">
+        </div>
+        <div>
+          <label>Branch</label>
+          <input type="text" id="ghBranch" placeholder="main" value="${esc(state.ghBranch||'main')}">
+        </div>
+        <div>
+          <label>Personal access token</label>
+          <input type="password" id="ghToken" placeholder="github_pat_... or ghp_...">
+          <div class="hint">Get this once from whoever set up the repo — it's a real credential, treat it like a password, not a game code.</div>
+        </div>
+      </div>
+      <button class="btn-primary" id="connectBtn">Connect</button>
+      <div class="hint center" style="margin-top:10px;">If this fails, double check the token hasn't expired or been revoked — GitHub auto-revokes tokens it detects committed to public repos, so this one should only ever be typed in here, never saved into the file.</div>
+    `;
+  }
+
+  else if(state.screen==='home'){
     html += `
       <div class="eyebrow">Classified &middot; Field Exercise</div>
       <h1 class="title">FIND THE MOLE</h1>
@@ -542,6 +545,15 @@ function render(){
 }
 
 function wireHomeEvents(){
+  const ghOwner=document.getElementById('ghOwner'), ghRepo=document.getElementById('ghRepo'),
+        ghBranch=document.getElementById('ghBranch'), ghToken=document.getElementById('ghToken');
+  if(ghOwner) ghOwner.oninput = e=>{ state.ghOwner=e.target.value; };
+  if(ghRepo) ghRepo.oninput = e=>{ state.ghRepo=e.target.value; };
+  if(ghBranch) ghBranch.oninput = e=>{ state.ghBranch=e.target.value; };
+  if(ghToken) ghToken.oninput = e=>{ state.ghToken=e.target.value; };
+  const connectBtn = document.getElementById('connectBtn');
+  if(connectBtn){ connectBtn.onclick = connectToGithub; }
+
   const nameInput = document.getElementById('nameInput');
   if(nameInput){ nameInput.oninput = e=>{ state.name = e.target.value; }; }
   const createBtn = document.getElementById('createBtn');
@@ -551,6 +563,23 @@ function wireHomeEvents(){
   if(joinBtn && codeInput){ joinBtn.onclick = ()=>joinRoom(codeInput.value); }
   const startBtn = document.getElementById('startBtn');
   if(startBtn){ startBtn.onclick = startGame; }
+}
+
+async function connectToGithub(){
+  const owner=(state.ghOwner||'').trim(), repo=(state.ghRepo||'').trim(),
+        branch=(state.ghBranch||'main').trim()||'main', token=(state.ghToken||'').trim();
+  if(!owner||!repo||!token){ setToast('Fill in username, repo, and token.'); return; }
+  gh = {owner, repo, branch, token};
+  try{
+    const res = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
+      headers: { Authorization: `Bearer ${token}`, Accept:'application/vnd.github+json' }
+    });
+    if(res.status===401){ setToast("Bad credentials — that token was rejected. Check it hasn't expired or been revoked."); gh=null; return; }
+    if(res.status===404){ setToast('Repo not found — check the username and repo name.'); gh=null; return; }
+    if(!res.ok){ setToast('GitHub error '+res.status+' — check the details and try again.'); gh=null; return; }
+  } catch(e){ setToast('Could not reach GitHub: '+e.message); gh=null; return; }
+  state.screen='home';
+  render();
 }
 
 function setMinutes(m){ state.discussionMinutes = m; render(); }
