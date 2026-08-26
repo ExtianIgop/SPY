@@ -608,6 +608,7 @@ function render(){
   else if(state.screen==='briefing'){
     const g = state.game;
     const amSpy = g.spyId===myId;
+    const shownWord = amSpy ? (NEAR_MISS[g.word] || g.word) : g.word;
     const inRound = g.players.some(p=>p.id===myId);
     if(!inRound){
       html += `
@@ -625,13 +626,9 @@ function render(){
           <div class="folder-body" onclick="declassify()">
             ${state.revealed ? `
               <div class="declassified">
-                <div class="role-label">${amSpy?'You are the':'The location is'}</div>
-                <div class="word-big ${amSpy?'mole-word':''}">${amSpy?'MOLE':esc(g.word)}</div>
-                ${amSpy ? `
-                  <div class="role-label" style="margin-top:14px;">Your intel points to</div>
-                  <div class="word-big" style="font-size:22px;color:#8a6a2a;">${esc(NEAR_MISS[g.word] || 'Somewhere unclear')}</div>
-                  <div class="hint" style="margin-top:6px;">That's not quite right — bluff carefully, it might give you away.</div>
-                ` : `<div class="hint" style="margin-top:6px;">Ask each other questions about the location without saying it outright. Find whoever doesn't know it.</div>`}
+                <div class="role-label">The location is</div>
+                <div class="word-big">${esc(shownWord)}</div>
+                <div class="hint" style="margin-top:6px;">Ask each other questions about the location without saying it outright. Find whoever doesn't seem to know it.</div>
               </div>
             ` : `
               <div class="stamp-cover">
