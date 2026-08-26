@@ -112,13 +112,20 @@ const WORDS = ["Airport","Bank","Beach Resort","Casino","Circus Tent","Corporate
 "Polar Station","Police Station","Restaurant","School","Gas Station","Space Station","Submarine",
 "Supermarket","Theater","University","Amusement Park","Zoo","Art Museum","Ski Resort","Wedding Venue"];
 
-// Shown only to the mole, as a decoy list -- deliberately a different set of
-// words from WORDS above, so seeing it gives no hint about the real answer.
-// Rough Tagalog translations -- worth a native-speaker double check before relying on them.
-const MOLE_HINTS = ["Paliparan","Bangko","Dalampasigan","Sugalan","Sirko","Opisina","Katedral","Embahada",
-"Ospital","Bulwagan ng Hotel","Kampo Militar","Istudyo ng Pelikula","Barkong Krusero","Tren","Barko ng Pirata",
-"Estasyon sa Poste","Estasyon ng Pulis","Kainan","Paaralan","Gasolinahan","Estasyong Kalawakan","Submarino",
-"Palengke","Teatro","Unibersidad","Parke ng Libangan","Zoo","Museo","Resort sa Niyebe","Lugar ng Kasal"];
+// Shown only to the mole: one decoy word, close enough to feel plausible but
+// genuinely wrong -- gives the mole a false sense of almost knowing the answer.
+const NEAR_MISS = {
+  "Airport":"Train Station", "Bank":"Post Office", "Beach Resort":"Ski Resort",
+  "Casino":"Nightclub", "Circus Tent":"Amusement Park", "Corporate Office":"Law Firm",
+  "Cathedral":"Chapel", "Embassy":"Consulate", "Hospital":"Clinic",
+  "Hotel Lobby":"Motel Lobby", "Military Base":"Police Academy", "Movie Studio":"TV Studio",
+  "Cruise Ship":"Ferry Terminal", "Passenger Train":"Subway Train", "Pirate Ship":"Fishing Trawler",
+  "Polar Station":"Weather Station", "Police Station":"Fire Station", "Restaurant":"Cafe",
+  "School":"Preschool", "Gas Station":"Car Wash", "Space Station":"Space Shuttle",
+  "Submarine":"Cargo Ship", "Supermarket":"Convenience Store", "Theater":"Concert Hall",
+  "University":"Community College", "Amusement Park":"Water Park", "Zoo":"Aquarium",
+  "Art Museum":"History Museum", "Ski Resort":"Ice Rink", "Wedding Venue":"Reception Hall"
+};
 
 function genId(){return Math.random().toString(36).slice(2,10)+Date.now().toString(36).slice(-4);}
 function genCode(){ const chars='ABCDEFGHJKLMNPQRSTUVWXYZ'; let c='';for(let i=0;i<4;i++)c+=chars[Math.floor(Math.random()*chars.length)]; return c; }
@@ -235,6 +242,12 @@ async function joinRoom(codeInput){
   enterRoundScreen(state.game);
 }
 
+function shuffleArray(arr){
+  const a = arr.slice();
+  for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; }
+  return a;
+}
+
 function pickSpyAndWord(playersArr, avoidWord){
   const spy = playersArr[Math.floor(Math.random()*playersArr.length)];
   const pool = WORDS.filter(w=>w!==avoidWord);
@@ -254,7 +267,7 @@ async function startGame(){
       current.discussionMs = state.discussionMinutes*60000;
       current.word=word; current.spyId=spyId;
       current.startTime=Date.now(); current.votingStartTime=null;
-      current.turnIndex=0; current.chat=current.chat||{}; current.chat[current.round]=[];
+      current.turnIndex=0; current.speakingOrder=shuffleArray(current.players.map(p=>p.id)); current.chat=current.chat||{}; current.chat[current.round]=[];
       return current;
     }, {message:'Start round '+state.code});
     if(updated){ state.game=updated; state.revealed=false; state.myVote=null; state.votedRound=null; enterRoundScreen(updated); }
@@ -272,7 +285,7 @@ async function newRound(){
       current.players = entries.map(e=>({id:e.id,name:e.name}));
       current.word=word; current.spyId=spyId;
       current.startTime=Date.now(); current.votingStartTime=null;
-      current.turnIndex=0; current.chat=current.chat||{}; current.chat[current.round]=[];
+      current.turnIndex=0; current.speakingOrder=shuffleArray(current.players.map(p=>p.id)); current.chat=current.chat||{}; current.chat[current.round]=[];
       return current;
     }, {message:'New round '+state.code});
     if(updated){ state.game=updated; state.revealed=false; state.myVote=null; state.votedRound=null; enterRoundScreen(updated); }
@@ -325,21 +338,33 @@ function handleSendChat(){
   sendChatMessage(text);
 }
 
+function currentSpeaker(g){
+  const players = g.players || [];
+  if(players.length===0) return null;
+  const order = (g.speakingOrder && g.speakingOrder.length===players.length) ? g.speakingOrder : players.map(p=>p.id);
+  const idx = (g.turnIndex||0) % order.length;
+  const speakerId = order[idx];
+  return players.find(p=>p.id===speakerId) || players[idx];
+}
+
 async function sendChatMessage(text){
   try{
     const updated = await ghMutate(roomPath(state.code), current=>{
       const players = current.players || [];
       if(players.length===0) return null;
-      const idx = (current.turnIndex||0) % players.length;
-      if(players[idx].id !== myId) return null; // not actually their turn — abort silently
+      const order = (current.speakingOrder && current.speakingOrder.length===players.length) ? current.speakingOrder : players.map(p=>p.id);
+      const idx = (current.turnIndex||0) % order.length;
+      const speakerId = order[idx];
+      if(speakerId !== myId) return null; // not actually their turn — abort silently
+      const speaker = players.find(p=>p.id===speakerId);
       const round = current.round;
       current.chat = current.chat || {};
       current.chat[round] = current.chat[round] || [];
-      current.chat[round].push({id:genId(), senderId:myId, senderName:players[idx].name, text, ts:Date.now()});
+      current.chat[round].push({id:genId(), senderId:myId, senderName:speaker.name, text, ts:Date.now()});
       current.turnIndex = idx+1;
       return current;
     }, {message:'Chat message '+state.code});
-    if(updated){ state.game = updated; render(); }
+    if(updated){ state.game = updated; patchOrRender(); }
     else { setToast("It's not your turn to speak."); }
   } catch(e){ setToast('Could not send: '+e.message); }
 }
@@ -354,7 +379,11 @@ async function revealResults(){
 
 function enterRoundScreen(g){
   if(g.status==='briefing') state.screen='briefing';
-  else if(g.status==='voting') state.screen='voting';
+  else if(g.status==='voting'){
+    state.screen='voting';
+    const roundVotes = (g.votes && g.votes[g.round]) || {};
+    state.votesCount = Object.values(roundVotes).length;
+  }
   else if(g.status==='results') state.screen='results';
   else state.screen='lobby';
   render();
@@ -408,7 +437,7 @@ async function tick(){
 
   if(unchanged) return; // nothing actually changed -- skip the re-render entirely
   lastGameSnapshot = snapshot;
-  render();
+  patchOrRender();
 }
 setInterval(tick, 5000);
 setInterval(()=>{
@@ -436,28 +465,67 @@ function renderChatHistory(g){
   `;
 }
 
+function chatMessagesHTML(messages){
+  return messages.length ? messages.slice(-30).map(m=>`<div class="chatmsg"><span class="sender">${esc(m.senderName)}:</span> ${esc(m.text)}</div>`).join('')
+                         : '<div class="hint">No one has spoken yet.</div>';
+}
+
 function renderChat(g){
   const players = g.players || [];
   if(players.length===0) return '';
   const round = g.round;
   const messages = (g.chat && g.chat[round]) || [];
-  const idx = (g.turnIndex||0) % players.length;
-  const turnPlayer = players[idx];
-  const myTurn = turnPlayer.id===myId;
+  const turnPlayer = currentSpeaker(g);
+  const myTurn = turnPlayer && turnPlayer.id===myId;
   return `
-    <div class="card">
+    <div class="card" id="roundTableCard">
       <label>Round Table</label>
-      <div class="chatlog">
-        ${messages.length ? messages.slice(-30).map(m=>`<div class="chatmsg"><span class="sender">${esc(m.senderName)}:</span> ${esc(m.text)}</div>`).join('')
-                           : '<div class="hint">No one has spoken yet.</div>'}
-      </div>
-      <div class="hint" style="margin-bottom:8px;">${myTurn ? "It's your turn to speak." : `Waiting on ${esc(turnPlayer.name)}&hellip;`}</div>
+      <div class="chatlog" id="chatLog">${chatMessagesHTML(messages)}</div>
+      <div class="hint" id="turnStatus" style="margin-bottom:8px;">${myTurn ? "It's your turn to speak." : `Waiting on ${esc(turnPlayer?turnPlayer.name:'')}&hellip;`}</div>
       <div class="row">
         <input type="text" id="chatInput" placeholder="${myTurn?'Say something…':'Not your turn'}" maxlength="240" ${myTurn?'':'disabled'}>
         <button class="btn-primary" id="chatSendBtn" style="flex:0 0 84px;" ${myTurn?'':'disabled'}>Send</button>
       </div>
     </div>
   `;
+}
+
+function patchChatUI(g){
+  const chatLogEl = document.getElementById('chatLog');
+  if(!chatLogEl) return false; // briefing screen not actually on-DOM yet -- caller should fall back to full render
+  const round = g.round;
+  const messages = (g.chat && g.chat[round]) || [];
+  const turnPlayer = currentSpeaker(g);
+  const myTurn = turnPlayer && turnPlayer.id===myId;
+
+  const wasNearBottom = (chatLogEl.scrollHeight - chatLogEl.scrollTop - chatLogEl.clientHeight) < 40;
+  chatLogEl.innerHTML = chatMessagesHTML(messages);
+  if(wasNearBottom) chatLogEl.scrollTop = chatLogEl.scrollHeight;
+
+  const turnStatusEl = document.getElementById('turnStatus');
+  if(turnStatusEl) turnStatusEl.textContent = myTurn ? "It's your turn to speak." : `Waiting on ${turnPlayer?turnPlayer.name:''}…`;
+
+  const chatInputEl = document.getElementById('chatInput');
+  const chatSendBtnEl = document.getElementById('chatSendBtn');
+  if(chatInputEl){
+    chatInputEl.disabled = !myTurn;
+    chatInputEl.placeholder = myTurn ? 'Say something…' : 'Not your turn';
+  }
+  if(chatSendBtnEl) chatSendBtnEl.disabled = !myTurn;
+
+  const clockEl = document.getElementById('liveclock');
+  if(clockEl && g.startTime){ clockEl.textContent = fmtClock(g.startTime+g.discussionMs-Date.now()); }
+
+  return true;
+}
+
+// Prefer a surgical patch over a full re-render whenever we're already on the
+// briefing screen with the chat visible -- a full render() there would destroy
+// and recreate the <input>, wiping whatever the current speaker was typing
+// and resetting the chat log's scroll position back to the top.
+function patchOrRender(){
+  if(state.screen==='briefing' && state.game && patchChatUI(state.game)) return;
+  render();
 }
 
 function render(){
@@ -555,8 +623,9 @@ function render(){
                 <div class="role-label">${amSpy?'You are the':'The location is'}</div>
                 <div class="word-big ${amSpy?'mole-word':''}">${amSpy?'MOLE':esc(g.word)}</div>
                 ${amSpy ? `
-                  <div class="hint" style="margin-top:6px;">You don't know the location. Listen closely, bluff convincingly, and try to blend in.</div>
-                  <div class="grid-locs">${MOLE_HINTS.map(w=>`<span>${esc(w)}</span>`).join('')}</div>
+                  <div class="role-label" style="margin-top:14px;">Your intel points to</div>
+                  <div class="word-big" style="font-size:22px;color:#8a6a2a;">${esc(NEAR_MISS[g.word] || 'Somewhere unclear')}</div>
+                  <div class="hint" style="margin-top:6px;">That's not quite right — bluff carefully, it might give you away.</div>
                 ` : `<div class="hint" style="margin-top:6px;">Ask each other questions about the location without saying it outright. Find whoever doesn't know it.</div>`}
               </div>
             ` : `
@@ -644,18 +713,7 @@ function render(){
     `;
   }
 
-  const prevChatInput = document.getElementById('chatInput');
-  const prevChatValue = prevChatInput ? prevChatInput.value : '';
-  const prevChatFocused = prevChatInput && document.activeElement===prevChatInput;
-  const prevSelStart = prevChatFocused ? prevChatInput.selectionStart : null;
-
   app.innerHTML = html;
-
-  const newChatInput = document.getElementById('chatInput');
-  if(newChatInput && prevChatValue){
-    newChatInput.value = prevChatValue;
-    if(prevChatFocused){ newChatInput.focus(); if(prevSelStart!=null) newChatInput.setSelectionRange(prevSelStart, prevSelStart); }
-  }
   wireHomeEvents();
 }
 
