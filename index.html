@@ -84,6 +84,7 @@
   .chatlog{max-height:170px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;margin-bottom:10px;padding-right:4px;}
   .chatmsg{font-size:13px;line-height:1.45;color:var(--text);}
   .chatmsg .sender{color:var(--gold);font-weight:600;}
+  .chatmsg-system{color:var(--redacted-2);font-style:italic;font-size:12px;}
   .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--ink-2);border:1px solid var(--redacted-2);color:var(--paper);padding:10px 16px;border-radius:3px;font-size:12px;max-width:90%;text-align:center;z-index:99;}
   a.linklike{color:var(--gold);text-decoration:underline;cursor:pointer;background:none;border:none;font-family:var(--mono);font-size:12px;padding:0;width:auto;display:inline;}
   code.inline{background:var(--ink);padding:2px 6px;border-radius:2px;color:var(--gold);}
@@ -115,21 +116,22 @@ const WORDS = [
   "Art Museum","Ski Resort","Pirate Ship","Wedding Venue"
 ]; // Rough Tagalog translations -- worth a native-speaker double check before relying on them.
 
-// Shown only to the mole: one decoy word, close enough to feel plausible but
-// genuinely wrong -- gives the mole a false sense of almost knowing the answer.
+// Shown only to the mole: one decoy word that shares a loose vibe or theme
+// with the real word (crowded, watery, formal, a vessel, etc.) but is a
+// genuinely different place -- not just a synonym of the same spot.
 // Kept in the same language as the real word so the mismatch itself isn't a tell.
 const NEAR_MISS = {
-  "Paliparan":"Estasyon ng Tren", "Palengke":"Talipapa", "Simbahan":"Kapilya",
-  "Paaralan":"Dalubhasaan", "Ospital":"Klinika", "Restawran":"Kapihan",
-  "Dalampasigan":"Resort sa Bundok", "Sinehan":"Teatro", "Estasyon ng Tren":"Terminal ng Bus",
-  "Bangko":"Opisina ng Koreo", "Botika":"Sari-Sari Store", "Barberya":"Salon",
-  "Bahay Kubo":"Bahay na Bato", "Sari-Sari Store":"Palengke", "Terminal ng Jeepney":"Terminal ng Bus",
-  "Palaisdaan":"Sakahan", "Plasa ng Bayan":"Bulwagang Bayan", "Barangay Hall":"Munisipyo",
-  "Videoke Bar":"Disco", "Talipapa":"Palengke",
-  "Casino":"Nightclub", "Cruise Ship":"Ferry Terminal", "Space Station":"Space Shuttle",
-  "Submarine":"Cargo Ship", "Military Base":"Police Academy", "Movie Studio":"TV Studio",
-  "Art Museum":"History Museum", "Ski Resort":"Ice Rink", "Pirate Ship":"Fishing Trawler",
-  "Wedding Venue":"Reception Hall"
+  "Paliparan":"Plasa ng Bayan", "Palengke":"Videoke Bar", "Simbahan":"Barangay Hall",
+  "Paaralan":"Sari-Sari Store", "Ospital":"Botika", "Restawran":"Sari-Sari Store",
+  "Dalampasigan":"Palaisdaan", "Sinehan":"Videoke Bar", "Estasyon ng Tren":"Terminal ng Jeepney",
+  "Bangko":"Munisipyo", "Botika":"Sari-Sari Store", "Barberya":"Videoke Bar",
+  "Bahay Kubo":"Palaisdaan", "Sari-Sari Store":"Talipapa", "Terminal ng Jeepney":"Estasyon ng Tren",
+  "Palaisdaan":"Dalampasigan", "Plasa ng Bayan":"Barangay Hall", "Barangay Hall":"Simbahan",
+  "Videoke Bar":"Palengke", "Talipapa":"Sari-Sari Store",
+  "Casino":"Nightclub", "Cruise Ship":"Submarine", "Space Station":"Submarine",
+  "Submarine":"Cruise Ship", "Military Base":"Police Academy", "Movie Studio":"Art Museum",
+  "Art Museum":"Movie Studio", "Ski Resort":"Beach Resort", "Pirate Ship":"Cruise Ship",
+  "Wedding Venue":"Casino"
 };
 
 function genId(){return Math.random().toString(36).slice(2,10)+Date.now().toString(36).slice(-4);}
@@ -272,7 +274,7 @@ async function startGame(){
       current.discussionMs = state.discussionMinutes*60000;
       current.word=word; current.spyId=spyId;
       current.startTime=Date.now(); current.votingStartTime=null;
-      current.turnIndex=0; current.speakingOrder=shuffleArray(current.players.map(p=>p.id)); current.chat=current.chat||{}; current.chat[current.round]=[];
+      current.turnIndex=0; current.turnStartTime=Date.now(); current.speakingOrder=shuffleArray(current.players.map(p=>p.id)); current.chat=current.chat||{}; current.chat[current.round]=[];
       return current;
     }, {message:'Start round '+state.code});
     if(updated){ state.game=updated; state.revealed=false; state.myVote=null; state.votedRound=null; enterRoundScreen(updated); }
@@ -290,7 +292,7 @@ async function newRound(){
       current.players = entries.map(e=>({id:e.id,name:e.name}));
       current.word=word; current.spyId=spyId;
       current.startTime=Date.now(); current.votingStartTime=null;
-      current.turnIndex=0; current.speakingOrder=shuffleArray(current.players.map(p=>p.id)); current.chat=current.chat||{}; current.chat[current.round]=[];
+      current.turnIndex=0; current.turnStartTime=Date.now(); current.speakingOrder=shuffleArray(current.players.map(p=>p.id)); current.chat=current.chat||{}; current.chat[current.round]=[];
       return current;
     }, {message:'New round '+state.code});
     if(updated){ state.game=updated; state.revealed=false; state.myVote=null; state.votedRound=null; enterRoundScreen(updated); }
@@ -367,11 +369,45 @@ async function sendChatMessage(text){
       current.chat[round] = current.chat[round] || [];
       current.chat[round].push({id:genId(), senderId:myId, senderName:speaker.name, text, ts:Date.now()});
       current.turnIndex = idx+1;
+      current.turnStartTime = Date.now();
       return current;
     }, {message:'Chat message '+state.code});
     if(updated){ state.game = updated; patchOrRender(); }
     else { setToast("It's not your turn to speak."); }
   } catch(e){ setToast('Could not send: '+e.message); }
+}
+
+const TURN_LIMIT_MS = 15000;
+let skipInFlight = false;
+
+async function skipTurnIfExpired(g){
+  if(!state.isHost || skipInFlight) return;
+  if(!g || g.status!=='briefing') return;
+  const players = g.players || [];
+  if(players.length===0 || !g.turnStartTime) return;
+  if(Date.now() - g.turnStartTime < TURN_LIMIT_MS) return;
+
+  skipInFlight = true;
+  try{
+    const updated = await ghMutate(roomPath(state.code), current=>{
+      const players = current.players || [];
+      if(players.length===0 || !current.turnStartTime) return null;
+      if(Date.now() - current.turnStartTime < TURN_LIMIT_MS) return null; // someone spoke just in time — abort
+      const order = (current.speakingOrder && current.speakingOrder.length===players.length) ? current.speakingOrder : players.map(p=>p.id);
+      const idx = (current.turnIndex||0) % order.length;
+      const speakerId = order[idx];
+      const speaker = players.find(p=>p.id===speakerId);
+      const round = current.round;
+      current.chat = current.chat || {};
+      current.chat[round] = current.chat[round] || [];
+      current.chat[round].push({id:genId(), senderId:'system', senderName:'System', text:`${speaker?speaker.name:'A player'}'s turn was skipped — time's up!`, ts:Date.now(), system:true});
+      current.turnIndex = idx+1;
+      current.turnStartTime = Date.now();
+      return current;
+    }, {message:'Turn skipped (timeout) '+state.code});
+    if(updated){ state.game = updated; patchOrRender(); }
+  } catch(e){ /* stay quiet — next tick will retry */ }
+  finally { skipInFlight = false; }
 }
 
 async function revealResults(){
@@ -453,6 +489,13 @@ setInterval(()=>{
       el.textContent = fmtClock(remain);
       if(remain<=0 && state.isHost){ startVoting(); }
     }
+    const turnEl = document.getElementById('turnClock');
+    if(turnEl && state.game.turnStartTime){
+      const turnRemain = Math.max(0, Math.ceil((state.game.turnStartTime + TURN_LIMIT_MS - Date.now())/1000));
+      turnEl.textContent = turnRemain + 's';
+      turnEl.style.color = turnRemain<=5 ? 'var(--redacted-2)' : 'var(--gold)';
+    }
+    skipTurnIfExpired(state.game);
   }
 },1000);
 
@@ -471,7 +514,9 @@ function renderChatHistory(g){
 }
 
 function chatMessagesHTML(messages){
-  return messages.length ? messages.slice(-30).map(m=>`<div class="chatmsg"><span class="sender">${esc(m.senderName)}:</span> ${esc(m.text)}</div>`).join('')
+  return messages.length ? messages.slice(-30).map(m=>m.system
+        ? `<div class="chatmsg chatmsg-system">&#9201; ${esc(m.text)}</div>`
+        : `<div class="chatmsg"><span class="sender">${esc(m.senderName)}:</span> ${esc(m.text)}</div>`).join('')
                          : '<div class="hint">No one has spoken yet.</div>';
 }
 
@@ -484,13 +529,17 @@ function renderChat(g){
   const myTurn = turnPlayer && turnPlayer.id===myId;
   return `
     <div class="card" id="roundTableCard">
-      <label>Round Table</label>
+      <div class="row" style="align-items:baseline;margin-bottom:8px;">
+        <label style="margin-bottom:0;">Round Table</label>
+        <span id="turnClock" style="flex:0 0 auto;font-family:var(--stamp);font-size:15px;color:var(--gold);">15s</span>
+      </div>
       <div class="chatlog" id="chatLog">${chatMessagesHTML(messages)}</div>
       <div class="hint" id="turnStatus" style="margin-bottom:8px;">${myTurn ? "It's your turn to speak." : `Waiting on ${esc(turnPlayer?turnPlayer.name:'')}&hellip;`}</div>
       <div class="row">
         <input type="text" id="chatInput" placeholder="${myTurn?'Say something…':'Not your turn'}" maxlength="240" ${myTurn?'':'disabled'}>
         <button class="btn-primary" id="chatSendBtn" style="flex:0 0 84px;" ${myTurn?'':'disabled'}>Send</button>
       </div>
+      <div class="hint" style="margin-top:8px;">Each turn has 15 seconds — miss it and you'll be skipped automatically.</div>
     </div>
   `;
 }
@@ -517,6 +566,12 @@ function patchChatUI(g){
     chatInputEl.placeholder = myTurn ? 'Say something…' : 'Not your turn';
   }
   if(chatSendBtnEl) chatSendBtnEl.disabled = !myTurn;
+
+  const turnClockEl = document.getElementById('turnClock');
+  if(turnClockEl && g.turnStartTime){
+    const turnRemain = Math.max(0, Math.ceil((g.turnStartTime + TURN_LIMIT_MS - Date.now())/1000));
+    turnClockEl.textContent = turnRemain + 's';
+  }
 
   const clockEl = document.getElementById('liveclock');
   if(clockEl && g.startTime){ clockEl.textContent = fmtClock(g.startTime+g.discussionMs-Date.now()); }
