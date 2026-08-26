@@ -107,24 +107,29 @@ const GITHUB_REPO   = "SPY";
 const GITHUB_BRANCH = "main";
 let gh = null; // {token} -- set via the Connect screen, never persisted or committed
 
-const WORDS = ["Airport","Bank","Beach Resort","Casino","Circus Tent","Corporate Office","Cathedral","Embassy",
-"Hospital","Hotel Lobby","Military Base","Movie Studio","Cruise Ship","Passenger Train","Pirate Ship",
-"Polar Station","Police Station","Restaurant","School","Gas Station","Space Station","Submarine",
-"Supermarket","Theater","University","Amusement Park","Zoo","Art Museum","Ski Resort","Wedding Venue"];
+const WORDS = [
+  "Paliparan","Palengke","Simbahan","Paaralan","Ospital","Restawran","Dalampasigan","Sinehan",
+  "Estasyon ng Tren","Bangko","Botika","Barberya","Bahay Kubo","Sari-Sari Store",
+  "Terminal ng Jeepney","Palaisdaan","Plasa ng Bayan","Barangay Hall","Videoke Bar","Talipapa",
+  "Casino","Cruise Ship","Space Station","Submarine","Military Base","Movie Studio",
+  "Art Museum","Ski Resort","Pirate Ship","Wedding Venue"
+]; // Rough Tagalog translations -- worth a native-speaker double check before relying on them.
 
 // Shown only to the mole: one decoy word, close enough to feel plausible but
 // genuinely wrong -- gives the mole a false sense of almost knowing the answer.
+// Kept in the same language as the real word so the mismatch itself isn't a tell.
 const NEAR_MISS = {
-  "Airport":"Train Station", "Bank":"Post Office", "Beach Resort":"Ski Resort",
-  "Casino":"Nightclub", "Circus Tent":"Amusement Park", "Corporate Office":"Law Firm",
-  "Cathedral":"Chapel", "Embassy":"Consulate", "Hospital":"Clinic",
-  "Hotel Lobby":"Motel Lobby", "Military Base":"Police Academy", "Movie Studio":"TV Studio",
-  "Cruise Ship":"Ferry Terminal", "Passenger Train":"Subway Train", "Pirate Ship":"Fishing Trawler",
-  "Polar Station":"Weather Station", "Police Station":"Fire Station", "Restaurant":"Cafe",
-  "School":"Preschool", "Gas Station":"Car Wash", "Space Station":"Space Shuttle",
-  "Submarine":"Cargo Ship", "Supermarket":"Convenience Store", "Theater":"Concert Hall",
-  "University":"Community College", "Amusement Park":"Water Park", "Zoo":"Aquarium",
-  "Art Museum":"History Museum", "Ski Resort":"Ice Rink", "Wedding Venue":"Reception Hall"
+  "Paliparan":"Estasyon ng Tren", "Palengke":"Talipapa", "Simbahan":"Kapilya",
+  "Paaralan":"Dalubhasaan", "Ospital":"Klinika", "Restawran":"Kapihan",
+  "Dalampasigan":"Resort sa Bundok", "Sinehan":"Teatro", "Estasyon ng Tren":"Terminal ng Bus",
+  "Bangko":"Opisina ng Koreo", "Botika":"Sari-Sari Store", "Barberya":"Salon",
+  "Bahay Kubo":"Bahay na Bato", "Sari-Sari Store":"Palengke", "Terminal ng Jeepney":"Terminal ng Bus",
+  "Palaisdaan":"Sakahan", "Plasa ng Bayan":"Bulwagang Bayan", "Barangay Hall":"Munisipyo",
+  "Videoke Bar":"Disco", "Talipapa":"Palengke",
+  "Casino":"Nightclub", "Cruise Ship":"Ferry Terminal", "Space Station":"Space Shuttle",
+  "Submarine":"Cargo Ship", "Military Base":"Police Academy", "Movie Studio":"TV Studio",
+  "Art Museum":"History Museum", "Ski Resort":"Ice Rink", "Pirate Ship":"Fishing Trawler",
+  "Wedding Venue":"Reception Hall"
 };
 
 function genId(){return Math.random().toString(36).slice(2,10)+Date.now().toString(36).slice(-4);}
