@@ -223,13 +223,14 @@ async function createRoom(){
     let tries=0;
     while(existing.json && tries<5){ code=genCode(); existing=await ghGetFile(roomPath(code)); tries++; }
     const room = freshRoom(state.name.trim());
-    room.roster[myId] = {id:myId, name:state.name.trim()};
+    room.roster[myId] = {id:myId, name:state.name.trim(), lastSeen:Date.now()};
     await ghMutate(roomPath(code), ()=>room, {message:'Open case file '+code});
   } catch(e){
     setToast('Could not reach GitHub: '+e.message);
     return;
   }
   state.code = code; state.isHost = true; state.screen='lobby';
+  lastHeartbeatSent = Date.now();
   render();
 }
 
@@ -243,12 +244,13 @@ async function joinRoom(codeInput){
   if(!existing.json){ setToast('No case file found with that code.'); return; }
   try{
     const updated = await ghMutate(roomPath(code), current=>{
-      current.roster[myId] = {id:myId, name:state.name.trim()};
+      current.roster[myId] = {id:myId, name:state.name.trim(), lastSeen:Date.now()};
       return current;
     }, {message:'Agent joins '+code, createIfMissing:false});
     state.game = updated;
   } catch(e){ setToast('Could not join: '+e.message); return; }
   state.code = code; state.isHost = (state.game.hostId===myId);
+  lastHeartbeatSent = Date.now();
   enterRoundScreen(state.game);
 }
 
@@ -436,9 +438,48 @@ function enterRoundScreen(g){
 
 /* ---------- polling ---------- */
 let lastGameSnapshot = null;
+const HEARTBEAT_MS = 20000;   // how often each laptop checks in
+const AWAY_MS = 35000;        // shown as "inactive" in the lobby after this long with no check-in
+const PRUNE_MS = 70000;       // host removes them from the roster after this long with no check-in
+let lastHeartbeatSent = 0;
+let pruneInFlight = false;
+
+async function sendHeartbeat(){
+  if(!state.code || Date.now()-lastHeartbeatSent < HEARTBEAT_MS) return;
+  lastHeartbeatSent = Date.now();
+  try{
+    await ghMutate(roomPath(state.code), current=>{
+      if(!current.roster || !current.roster[myId]) return null;
+      current.roster[myId].lastSeen = Date.now();
+      return current;
+    }, {message:'Heartbeat '+state.code, createIfMissing:false});
+  } catch(e){ /* stay quiet -- next heartbeat will retry */ }
+}
+
+async function pruneStaleAgents(g){
+  if(!state.isHost || pruneInFlight || state.screen!=='lobby') return;
+  const roster = g.roster || {};
+  const now = Date.now();
+  const staleIds = Object.values(roster)
+    .filter(p => p.id!==myId && p.lastSeen && (now-p.lastSeen) > PRUNE_MS)
+    .map(p => p.id);
+  if(staleIds.length===0) return;
+  pruneInFlight = true;
+  try{
+    await ghMutate(roomPath(state.code), current=>{
+      let changed = false;
+      staleIds.forEach(id=>{
+        if(current.roster && current.roster[id]){ delete current.roster[id]; changed = true; }
+      });
+      return changed ? current : null;
+    }, {message:'Prune inactive agents '+state.code, createIfMissing:false});
+  } catch(e){ /* stay quiet -- next check will retry */ }
+  finally{ pruneInFlight = false; }
+}
 
 async function tick(){
   if(state.screen==='home' || state.screen==='connect' || !state.code) return;
+  sendHeartbeat();
   let g;
   try{ const r = await ghGetFile(roomPath(state.code)); g = r.json; }
   catch(e){ setToast('Lost contact with GitHub: '+e.message); return; }
@@ -450,6 +491,8 @@ async function tick(){
   state.game = g;
   state.isHost = (g.hostId===myId);
   state.roster = Object.values(g.roster||{}).sort((a,b)=>a.name.localeCompare(b.name));
+
+  if(state.screen==='lobby'){ pruneStaleAgents(g); }
 
   if(g.status!==state.screen){
     lastGameSnapshot = snapshot;
@@ -659,8 +702,12 @@ function render(){
       <div class="card">
         <label>Agents in the room (${roster.length})</label>
         <ul class="manifest">
-          ${roster.map((p,i)=>`<li><span class="num">${String(i+1).padStart(3,'0')}</span>${esc(p.name)}${p.id===g.hostId?'<span class="host-tag">HOST</span>':''}${p.id===myId?' <span style="color:var(--gold)">(you)</span>':''}</li>`).join('') || '<li class="hint">Waiting for agents to check in&hellip;</li>'}
+          ${roster.map((p,i)=>{
+            const isAway = p.lastSeen && (Date.now()-p.lastSeen) > AWAY_MS;
+            return `<li><span class="num">${String(i+1).padStart(3,'0')}</span>${esc(p.name)}${isAway?' <span style="color:var(--steel);font-size:11px;">(inactive)</span>':''}${p.id===g.hostId?'<span class="host-tag">HOST</span>':''}${p.id===myId?' <span style="color:var(--gold)">(you)</span>':''}</li>`;
+          }).join('') || '<li class="hint">Waiting for agents to check in&hellip;</li>'}
         </ul>
+        <div class="hint" style="margin-top:8px;">Agents who go quiet for about a minute are removed from the roster automatically.</div>
       </div>
       ${state.isHost ? `
         <div class="card gold">
@@ -759,6 +806,7 @@ function render(){
     const noVotes = maxVotes===0;
     const caught = !noVotes && topSuspects.length===1 && topSuspects[0]===g.spyId;
     const spyName = (g.players.find(p=>p.id===g.spyId)||{}).name || 'Unknown';
+    const spyShownWord = NEAR_MISS[g.word] || 'Somewhere unclear';
     const verdictText = noVotes ? 'MOLE WINS — NO ONE VOTED' : caught ? 'MOLE CAUGHT' : 'MOLE ESCAPED';
     html += `
       <div class="eyebrow">Case File ${esc(state.code)} &middot; Round ${g.round}</div>
@@ -770,6 +818,8 @@ function render(){
           <div class="word-big">${esc(g.word)}</div>
           <div class="role-label" style="margin-top:14px;">The mole was</div>
           <div class="word-big mole-word">${esc(spyName)}</div>
+          <div class="role-label" style="margin-top:14px;">${esc(spyName)} was actually told</div>
+          <div class="word-big" style="font-size:20px;color:#8a6a2a;">${esc(spyShownWord)}</div>
           <div class="verdict ${caught?'win':'lose'}">${verdictText}</div>
           ${noVotes ? `<div class="hint" style="margin-top:6px;">Time ran out before anyone cast a vote.</div>` : ''}
         </div>
