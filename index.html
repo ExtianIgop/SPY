@@ -102,11 +102,11 @@
    revoke it once you're done playing.
    ========================================================= */
 const GITHUB_OWNER  = "ExtianIgop";
-const GITHUB_REPO   = "spy.github.io";
+const GITHUB_REPO   = "SPY";
 const GITHUB_BRANCH = "main";
 const GITHUB_TOKEN  = "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";
 
-const NOT_CONFIGURED = GITHUB_TOKEN === "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";
+const NOT_CONFIGURED = !GITHUB_TOKEN || GITHUB_TOKEN.length < 20;
 const API_BASE = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/`;
 
 const WORDS = ["Airport","Bank","Beach Resort","Casino","Circus Tent","Corporate Office","Cathedral","Embassy",
