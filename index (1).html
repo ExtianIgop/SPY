@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FIND THE MOLE — Case File</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Special+Elite&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#15181b; --ink-2:#1e2327; --ink-3:#262c31;
+    --paper:#e9e2cd; --paper-dim:#c9bf9f;
+    --redacted:#a8362a; --redacted-2:#c24232;
+    --steel:#6b7a82; --gold:#c9a227;
+    --text:#e9e2cd; --text-dim:#8a9198;
+    --mono:'IBM Plex Mono', monospace; --stamp:'Special Elite', cursive;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--ink);
+    background-image:radial-gradient(circle at 20% 10%, rgba(255,255,255,0.03), transparent 40%),
+                      radial-gradient(circle at 80% 90%, rgba(255,255,255,0.025), transparent 40%);
+    color:var(--text); font-family:var(--mono);
+    min-height:100vh; display:flex; justify-content:center;
+    padding:28px 14px 60px;
+  }
+  #app{width:100%;max-width:460px;}
+  .eyebrow{font-size:11px;letter-spacing:0.28em;color:var(--steel);text-transform:uppercase;margin-bottom:6px;}
+  h1.title{font-family:var(--stamp);font-size:30px;color:var(--paper);margin:0 0 4px;letter-spacing:0.02em;line-height:1.15;}
+  .sub{color:var(--text-dim);font-size:13px;margin-bottom:24px;line-height:1.5;}
+  .card{background:var(--ink-2);border:1px solid var(--ink-3);border-radius:3px;padding:22px 20px;margin-bottom:16px;position:relative;}
+  .card::before{content:'';position:absolute;top:0;left:0;bottom:0;width:4px;background:var(--steel);}
+  .card.hot::before{background:var(--redacted-2);}
+  .card.gold::before{background:var(--gold);}
+  label{display:block;font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--steel);margin-bottom:8px;}
+  input[type=text]{width:100%;background:var(--ink);border:1px solid var(--ink-3);color:var(--paper);padding:12px 12px;font-family:var(--mono);font-size:16px;border-radius:2px;letter-spacing:0.05em;outline:none;}
+  input[type=text]:focus{border-color:var(--steel);}
+  input[type=text].code-input{text-transform:uppercase;letter-spacing:0.3em;text-align:center;font-size:20px;}
+  button{font-family:var(--mono);font-weight:600;font-size:13px;letter-spacing:0.08em;text-transform:uppercase;border:none;border-radius:2px;padding:13px 16px;cursor:pointer;width:100%;transition:transform .08s ease, filter .15s ease;}
+  button:active{transform:scale(0.98);}
+  button:disabled{opacity:0.35;cursor:not-allowed;}
+  .btn-primary{background:var(--redacted-2);color:#f4ece0;}
+  .btn-primary:hover:not(:disabled){filter:brightness(1.08);}
+  .btn-ghost{background:transparent;border:1px solid var(--ink-3);color:var(--text-dim);}
+  .btn-ghost:hover:not(:disabled){border-color:var(--steel);color:var(--paper);}
+  .btn-gold{background:var(--gold);color:#1a1503;}
+  .row{display:flex;gap:10px;}
+  .row > *{flex:1;}
+  .stack > * + *{margin-top:10px;}
+  .code-display{font-family:var(--stamp);font-size:44px;letter-spacing:0.12em;color:var(--gold);text-align:center;margin:6px 0 4px;}
+  .manifest{list-style:none;margin:0;padding:0;}
+  .manifest li{display:flex;align-items:center;gap:12px;padding:10px 4px;border-bottom:1px solid var(--ink-3);font-size:14px;}
+  .manifest li:last-child{border-bottom:none;}
+  .manifest .num{color:var(--steel);font-size:12px;width:26px;}
+  .manifest .host-tag{margin-left:auto;font-size:10px;letter-spacing:0.1em;color:var(--gold);border:1px solid var(--gold);padding:2px 6px;border-radius:2px;}
+  .hint{font-size:12px;color:var(--text-dim);line-height:1.6;}
+  .center{text-align:center;}
+  .folder{background:var(--paper);color:var(--ink);border-radius:4px;padding:0;position:relative;overflow:hidden;box-shadow:0 12px 30px rgba(0,0,0,0.4);margin-bottom:20px;}
+  .folder-tab{background:var(--paper-dim);font-family:var(--stamp);font-size:11px;letter-spacing:0.08em;text-transform:uppercase;padding:7px 14px;display:inline-block;border-radius:0 0 4px 0;color:#3a3226;}
+  .folder-body{padding:26px 22px 30px;min-height:150px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;position:relative;cursor:pointer;}
+  .stamp-cover{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:var(--paper);}
+  .stamp-cover .stampmark{font-family:var(--stamp);font-size:26px;color:var(--redacted);border:4px solid var(--redacted);padding:10px 22px;transform:rotate(-8deg);letter-spacing:0.06em;opacity:0.92;}
+  .stamp-cover .tapme{position:absolute;bottom:14px;font-size:10px;letter-spacing:0.16em;color:#8a7c5c;text-transform:uppercase;}
+  .declassified{animation:stampin .35s ease;}
+  @keyframes stampin{from{opacity:0;transform:scale(1.3) rotate(-4deg);}to{opacity:1;transform:scale(1) rotate(0);}}
+  .word-big{font-family:var(--stamp);font-size:30px;line-height:1.2;margin:6px 0 2px;}
+  .role-label{font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:#6b5f45;}
+  .mole-word{color:var(--redacted);}
+  .grid-locs{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:16px;width:100%;}
+  .grid-locs span{font-size:11px;background:var(--paper-dim);border-radius:2px;padding:6px 4px;text-align:center;color:#3a3226;}
+  .clock{font-family:var(--stamp);font-size:38px;text-align:center;color:var(--paper);letter-spacing:0.04em;margin:2px 0 2px;}
+  .vote-list{list-style:none;margin:0;padding:0;}
+  .vote-list li{margin-bottom:8px;}
+  .vote-list button{display:flex;justify-content:space-between;align-items:center;background:var(--ink);border:1px solid var(--ink-3);color:var(--text);font-weight:400;text-transform:none;letter-spacing:0;font-size:14px;}
+  .vote-list button.selected{border-color:var(--gold);color:var(--gold);}
+  .tally-row{display:flex;align-items:center;gap:10px;margin-bottom:8px;font-size:13px;}
+  .tally-bar{height:8px;background:var(--ink);flex:1;border-radius:2px;overflow:hidden;}
+  .tally-fill{height:100%;background:var(--steel);}
+  .tally-fill.spy{background:var(--redacted-2);}
+  .verdict{font-family:var(--stamp);font-size:22px;text-align:center;padding:10px 0 2px;}
+  .verdict.win{color:#8fae7a;}
+  .verdict.lose{color:var(--redacted-2);}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--ink-2);border:1px solid var(--redacted-2);color:var(--paper);padding:10px 16px;border-radius:3px;font-size:12px;max-width:90%;text-align:center;z-index:99;}
+  a.linklike{color:var(--gold);text-decoration:underline;cursor:pointer;background:none;border:none;font-family:var(--mono);font-size:12px;padding:0;width:auto;display:inline;}
+  code.inline{background:var(--ink);padding:2px 6px;border-radius:2px;color:var(--gold);}
+  ol.setup li{margin-bottom:10px;font-size:13px;line-height:1.6;color:var(--paper);}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+/* =========================================================
+   GITHUB CONFIG — REPLACE BEFORE HOSTING
+   1. Create a throwaway repo just for this game (not a real project repo).
+   2. GitHub.com -> Settings -> Developer settings -> Personal access tokens
+      -> Fine-grained tokens -> Generate new token.
+      Scope it to ONLY that one repo, permission: Contents = Read and write.
+   3. Fill in the four values below.
+   NOTE: this token will be visible to anyone who opens dev tools on the
+   hosted page. Only use a token scoped to this one throwaway repo, and
+   revoke it once you're done playing.
+   ========================================================= */
+const GITHUB_OWNER  = "ExtianIgop";
+const GITHUB_REPO   = "SPY";
+const GITHUB_BRANCH = "main";
+const GITHUB_TOKEN  = "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";
+
+const NOT_CONFIGURED = !GITHUB_TOKEN || GITHUB_TOKEN.length < 20;
+const API_BASE = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/`;
+
+const WORDS = ["Airport","Bank","Beach Resort","Casino","Circus Tent","Corporate Office","Cathedral","Embassy",
+"Hospital","Hotel Lobby","Military Base","Movie Studio","Cruise Ship","Passenger Train","Pirate Ship",
+"Polar Station","Police Station","Restaurant","School","Gas Station","Space Station","Submarine",
+"Supermarket","Theater","University","Amusement Park","Zoo","Art Museum","Ski Resort","Wedding Venue"];
+
+function genId(){return Math.random().toString(36).slice(2,10)+Date.now().toString(36).slice(-4);}
+function genCode(){ const chars='ABCDEFGHJKLMNPQRSTUVWXYZ'; let c='';for(let i=0;i<4;i++)c+=chars[Math.floor(Math.random()*chars.length)]; return c; }
+function fmtClock(ms){ if(ms<0)ms=0; const s=Math.floor(ms/1000); const m=Math.floor(s/60); const r=s%60; return String(m).padStart(2,'0')+':'+String(r).padStart(2,'0'); }
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function b64EncodeUnicode(str){ return btoa(unescape(encodeURIComponent(str))); }
+function b64DecodeUnicode(str){ return decodeURIComponent(escape(atob(str.replace(/\n/g,'')))); }
+
+/* ---------- GitHub Contents API helpers ---------- */
+async function ghGetFile(path){
+  const res = await fetch(API_BASE+path+`?ref=${GITHUB_BRANCH}&t=${Date.now()}`, {
+    headers: { Authorization: `Bearer ${GITHUB_TOKEN}`, Accept: 'application/vnd.github+json' }
+  });
+  if(res.status===404) return {json:null, sha:null};
+  if(!res.ok) throw new Error('GitHub API error '+res.status+': '+(await res.text()).slice(0,200));
+  const data = await res.json();
+  return { json: JSON.parse(b64DecodeUnicode(data.content)), sha: data.sha };
+}
+
+async function ghPutFile(path, obj, sha, message){
+  const body = {
+    message: message || ('update '+path),
+    content: b64EncodeUnicode(JSON.stringify(obj)),
+    branch: GITHUB_BRANCH
+  };
+  if(sha) body.sha = sha;
+  const res = await fetch(API_BASE+path, {
+    method:'PUT',
+    headers: { Authorization: `Bearer ${GITHUB_TOKEN}`, Accept:'application/vnd.github+json', 'Content-Type':'application/json' },
+    body: JSON.stringify(body)
+  });
+  if(res.status===409){ const e=new Error('conflict'); e.conflict=true; throw e; }
+  if(!res.ok) throw new Error('GitHub API error '+res.status+': '+(await res.text()).slice(0,200));
+  return await res.json();
+}
+
+async function ghMutate(path, mutatorFn, opts={}){
+  const createIfMissing = opts.createIfMissing !== false;
+  let lastErr = null;
+  for(let attempt=0; attempt<6; attempt++){
+    let current, sha;
+    try{ const r = await ghGetFile(path); current = r.json; sha = r.sha; }
+    catch(e){ lastErr=e; await sleep(300+attempt*200); continue; }
+    if(current===null && !createIfMissing) return null;
+    const next = mutatorFn(current);
+    if(next===null || next===undefined) return null;
+    try{
+      await ghPutFile(path, next, sha, opts.message);
+      return next;
+    } catch(e){
+      if(e.conflict){ await sleep(250+attempt*200); continue; }
+      throw e;
+    }
+  }
+  throw lastErr || new Error('Could not write after several attempts (repo may be busy).');
+}
+function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+const roomPath = code => `data/room-${code}.json`;
+
+/* ---------- state ---------- */
+const myId = genId();
+let state = {
+  screen:'home', name:'', code:'', isHost:false, discussionMinutes:5,
+  game:null, roster:[], revealed:false, myVote:null, votesCount:0, toast:null
+};
+let tallyCache = {tally:{}, total:0};
+
+function setToast(msg){ state.toast=msg; render(); setTimeout(()=>{ if(state.toast===msg){state.toast=null; render();} },3600); }
+
+function freshRoom(hostName){
+  return {
+    status:'lobby', hostId:myId, hostName, round:0,
+    discussionMs: state.discussionMinutes*60000, players:[], word:null, spyId:null,
+    startTime:null, votingStartTime:null,
+    roster:{}, votes:{}
+  };
+}
+
+async function createRoom(){
+  if(!state.name.trim()){ setToast('Enter your name first.'); return; }
+  let code = genCode();
+  try{
+    let existing = await ghGetFile(roomPath(code));
+    let tries=0;
+    while(existing.json && tries<5){ code=genCode(); existing=await ghGetFile(roomPath(code)); tries++; }
+    const room = freshRoom(state.name.trim());
+    room.roster[myId] = {id:myId, name:state.name.trim()};
+    await ghMutate(roomPath(code), ()=>room, {message:'Open case file '+code});
+  } catch(e){
+    setToast('Could not reach GitHub: '+e.message);
+    return;
+  }
+  state.code = code; state.isHost = true; state.screen='lobby';
+  render();
+}
+
+async function joinRoom(codeInput){
+  const code = codeInput.trim().toUpperCase();
+  if(!state.name.trim()){ setToast('Enter your name first.'); return; }
+  if(!code){ setToast('Enter a case file code.'); return; }
+  let existing;
+  try{ existing = await ghGetFile(roomPath(code)); }
+  catch(e){ setToast('Could not reach GitHub: '+e.message); return; }
+  if(!existing.json){ setToast('No case file found with that code.'); return; }
+  try{
+    const updated = await ghMutate(roomPath(code), current=>{
+      current.roster[myId] = {id:myId, name:state.name.trim()};
+      return current;
+    }, {message:'Agent joins '+code, createIfMissing:false});
+    state.game = updated;
+  } catch(e){ setToast('Could not join: '+e.message); return; }
+  state.code = code; state.isHost = (state.game.hostId===myId);
+  enterRoundScreen(state.game);
+}
+
+function pickSpyAndWord(playersArr, avoidWord){
+  const spy = playersArr[Math.floor(Math.random()*playersArr.length)];
+  const pool = WORDS.filter(w=>w!==avoidWord);
+  const word = pool[Math.floor(Math.random()*pool.length)];
+  return {spyId:spy.id, word};
+}
+
+async function startGame(){
+  if(!state.isHost) return;
+  try{
+    const updated = await ghMutate(roomPath(state.code), current=>{
+      const entries = Object.values(current.roster||{});
+      if(entries.length<3){ setToast('Need at least 3 agents to start.'); return null; }
+      const {spyId,word} = pickSpyAndWord(entries, null);
+      current.status='briefing'; current.round=(current.round||0)+1;
+      current.players = entries.map(e=>({id:e.id,name:e.name}));
+      current.discussionMs = state.discussionMinutes*60000;
+      current.word=word; current.spyId=spyId;
+      current.startTime=Date.now(); current.votingStartTime=null;
+      return current;
+    }, {message:'Start round '+state.code});
+    if(updated){ state.game=updated; state.revealed=false; state.myVote=null; enterRoundScreen(updated); }
+  } catch(e){ setToast('Could not start round: '+e.message); }
+}
+
+async function newRound(){
+  if(!state.isHost) return;
+  try{
+    const updated = await ghMutate(roomPath(state.code), current=>{
+      const entries = Object.values(current.roster||{});
+      if(entries.length<3){ setToast('Need at least 3 agents to start.'); return null; }
+      const {spyId,word} = pickSpyAndWord(entries, current.word);
+      current.status='briefing'; current.round=(current.round||0)+1;
+      current.players = entries.map(e=>({id:e.id,name:e.name}));
+      current.word=word; current.spyId=spyId;
+      current.startTime=Date.now(); current.votingStartTime=null;
+      return current;
+    }, {message:'New round '+state.code});
+    if(updated){ state.game=updated; state.revealed=false; state.myVote=null; enterRoundScreen(updated); }
+  } catch(e){ setToast('Could not start round: '+e.message); }
+}
+
+async function backToLobby(){
+  if(!state.isHost) return;
+  try{
+    const updated = await ghMutate(roomPath(state.code), current=>{ current.status='lobby'; return current; }, {message:'Back to lobby '+state.code});
+    state.game=updated; state.screen='lobby'; render();
+  } catch(e){ setToast('Could not update: '+e.message); }
+}
+
+async function startVoting(){
+  if(!state.isHost) return;
+  try{
+    const updated = await ghMutate(roomPath(state.code), current=>{ current.status='voting'; current.votingStartTime=Date.now(); return current; }, {message:'Start voting '+state.code});
+    state.game=updated; enterRoundScreen(updated);
+  } catch(e){ setToast('Could not update: '+e.message); }
+}
+
+async function castVote(suspectId){
+  state.myVote = suspectId; render();
+  try{
+    await ghMutate(roomPath(state.code), current=>{
+      const round = current.round;
+      current.votes[round] = current.votes[round] || {};
+      current.votes[round][myId] = suspectId;
+      return current;
+    }, {message:'Vote cast '+state.code});
+  } catch(e){ setToast('Could not save your vote: '+e.message); }
+}
+
+async function revealResults(){
+  if(!state.isHost) return;
+  try{
+    const updated = await ghMutate(roomPath(state.code), current=>{ current.status='results'; return current; }, {message:'Reveal results '+state.code});
+    state.game=updated; enterRoundScreen(updated);
+  } catch(e){ setToast('Could not update: '+e.message); }
+}
+
+function enterRoundScreen(g){
+  if(g.status==='briefing') state.screen='briefing';
+  else if(g.status==='voting') state.screen='voting';
+  else if(g.status==='results') state.screen='results';
+  else state.screen='lobby';
+  render();
+}
+
+/* ---------- polling ---------- */
+async function tick(){
+  if(state.screen==='home' || !state.code) return;
+  let g;
+  try{ const r = await ghGetFile(roomPath(state.code)); g = r.json; }
+  catch(e){ setToast('Lost contact with GitHub: '+e.message); return; }
+  if(!g) return;
+  state.game = g;
+  state.isHost = (g.hostId===myId);
+  state.roster = Object.values(g.roster||{}).sort((a,b)=>a.name.localeCompare(b.name));
+
+  if(g.status!==state.screen){
+    if(g.status==='briefing'){ state.revealed=false; state.myVote=null; }
+    enterRoundScreen(g);
+    return;
+  }
+
+  if(state.screen==='briefing'){
+    const elapsed = Date.now()-g.startTime;
+    if(elapsed>=g.discussionMs && state.isHost){ await startVoting(); return; }
+  }
+
+  if(state.screen==='voting'){
+    const roundVotes = (g.votes && g.votes[g.round]) || {};
+    const entries = Object.values(roundVotes);
+    state.votesCount = entries.length;
+    if(state.isHost && g.players && entries.length>=g.players.length && g.players.length>0){
+      await revealResults(); return;
+    }
+  }
+
+  if(state.screen==='results'){
+    const roundVotes = (g.votes && g.votes[g.round]) || {};
+    const entries = Object.values(roundVotes);
+    const tally={};
+    entries.forEach(v=>{ tally[v]=(tally[v]||0)+1; });
+    tallyCache = {tally, total: entries.length};
+  }
+
+  render();
+}
+setInterval(tick, 5000);
+setInterval(()=>{
+  if(state.screen==='briefing' && state.game && state.game.startTime){
+    const el = document.getElementById('liveclock');
+    if(el){
+      const remain = state.game.startTime + state.game.discussionMs - Date.now();
+      el.textContent = fmtClock(remain);
+      if(remain<=0 && state.isHost){ startVoting(); }
+    }
+  }
+},1000);
+
+/* ---------- render ---------- */
+function render(){
+  const app = document.getElementById('app');
+
+  if(NOT_CONFIGURED){
+    app.innerHTML = `
+      <div class="eyebrow">Setup required</div>
+      <h1 class="title" style="font-size:24px;">Connect GitHub first</h1>
+      <div class="sub">This copy isn't wired up to a repo yet, so case files can't be saved. Do this once, then re-host the file:</div>
+      <div class="card">
+        <ol class="setup">
+          <li>Create a small, throwaway repo just for this game — not a real project repo, since every action creates a commit.</li>
+          <li>On GitHub.com: <b>Settings &rarr; Developer settings &rarr; Personal access tokens &rarr; Fine-grained tokens &rarr; Generate new token.</b></li>
+          <li>Scope it to <b>only that one repo</b>, with permission <b>Contents: Read and write</b>. Nothing else.</li>
+          <li>Paste your username, repo name, and token into the constants near the top of this file's script.</li>
+          <li>Re-upload/host the file. It'll work across every laptop from then on.</li>
+        </ol>
+      </div>
+      <div class="hint">This token will be visible to anyone who opens dev tools on the hosted page. Keep it scoped to the throwaway repo, and revoke it once you're done playing.</div>
+    `;
+    return;
+  }
+
+  let html = '';
+  if(state.toast) html += `<div class="toast">${esc(state.toast)}</div>`;
+
+  if(state.screen==='home'){
+    html += `
+      <div class="eyebrow">Classified &middot; Field Exercise</div>
+      <h1 class="title">FIND THE MOLE</h1>
+      <div class="sub">A quick social-deduction game for the team. Everyone gets the same location — except one mole, who has to bluff their way through.</div>
+      <div class="card">
+        <label>Your codename</label>
+        <input type="text" id="nameInput" placeholder="e.g. Kristian" value="${esc(state.name)}" maxlength="24">
+      </div>
+      <div class="card hot stack">
+        <label>Start a new case file</label>
+        <div class="hint">You'll get a 4-letter code to share with your team.</div>
+        <button class="btn-primary" id="createBtn">Open New Case File</button>
+      </div>
+      <div class="card stack">
+        <label>Join an existing case file</label>
+        <input type="text" id="codeInput" class="code-input" placeholder="CODE" maxlength="4">
+        <button class="btn-ghost" id="joinBtn" style="border-color:var(--steel);color:var(--paper)">Join Case File</button>
+      </div>
+      <div class="hint center" style="margin-top:8px;">Each action here (joining, voting, starting rounds) writes a small commit to the game's GitHub repo.</div>
+    `;
+  }
+
+  else if(state.screen==='lobby'){
+    const g = state.game || {};
+    const roster = state.roster;
+    html += `
+      <div class="eyebrow">Case File Open</div>
+      <div class="code-display">${esc(state.code)}</div>
+      <div class="sub center">Share this code with your team. Everyone joins on their own laptop.</div>
+      <div class="card">
+        <label>Agents in the room (${roster.length})</label>
+        <ul class="manifest">
+          ${roster.map((p,i)=>`<li><span class="num">${String(i+1).padStart(3,'0')}</span>${esc(p.name)}${p.id===g.hostId?'<span class="host-tag">HOST</span>':''}${p.id===myId?' <span style="color:var(--gold)">(you)</span>':''}</li>`).join('') || '<li class="hint">Waiting for agents to check in&hellip;</li>'}
+        </ul>
+      </div>
+      ${state.isHost ? `
+        <div class="card gold">
+          <label>Discussion time</label>
+          <div class="row" style="margin-bottom:14px;">
+            ${[3,5,8].map(m=>`<button class="${state.discussionMinutes===m?'btn-gold':'btn-ghost'}" onclick="setMinutes(${m})">${m} min</button>`).join('')}
+          </div>
+          <button class="btn-primary" id="startBtn" ${roster.length<3?'disabled':''}>${roster.length<3?'Need 3+ Agents':'Start Round'}</button>
+        </div>
+      ` : `<div class="hint center">Waiting for the host to start the round&hellip;</div>`}
+      <div class="center" style="margin-top:16px;"><a class="linklike" onclick="leaveToHome()">Leave case file</a></div>
+    `;
+  }
+
+  else if(state.screen==='briefing'){
+    const g = state.game;
+    const amSpy = g.spyId===myId;
+    const inRound = g.players.some(p=>p.id===myId);
+    if(!inRound){
+      html += `
+        <div class="eyebrow">Case File ${esc(state.code)} &middot; Round ${g.round}</div>
+        <h1 class="title" style="font-size:22px;">Sit tight, agent.</h1>
+        <div class="sub">A round is already underway. You'll be briefed in next round.</div>
+      `;
+    } else {
+      html += `
+        <div class="eyebrow">Case File ${esc(state.code)} &middot; Round ${g.round}</div>
+        <div class="sub center">Discussion time remaining</div>
+        <div class="clock" id="liveclock">${fmtClock(g.startTime+g.discussionMs-Date.now())}</div>
+        <div class="folder">
+          <div class="folder-tab">FILE No. 0${g.round}</div>
+          <div class="folder-body" onclick="declassify()">
+            ${state.revealed ? `
+              <div class="declassified">
+                <div class="role-label">${amSpy?'You are the':'The location is'}</div>
+                <div class="word-big ${amSpy?'mole-word':''}">${amSpy?'MOLE':esc(g.word)}</div>
+                ${amSpy ? `
+                  <div class="hint" style="margin-top:6px;">You don't know the location. Listen closely, bluff convincingly, and try to blend in.</div>
+                  <div class="grid-locs">${WORDS.map(w=>`<span>${esc(w)}</span>`).join('')}</div>
+                ` : `<div class="hint" style="margin-top:6px;">Ask each other questions about the location without saying it outright. Find whoever doesn't know it.</div>`}
+              </div>
+            ` : `
+              <div class="stamp-cover">
+                <div class="stampmark">CLASSIFIED</div>
+                <div class="tapme">Tap to declassify</div>
+              </div>
+            `}
+          </div>
+        </div>
+        <div class="hint center">Only you can see this card. Keep your device out of view.</div>
+        ${state.isHost ? `<button class="btn-ghost" style="margin-top:14px;" onclick="startVoting()">Skip to Voting</button>` : ''}
+      `;
+    }
+  }
+
+  else if(state.screen==='voting'){
+    const g = state.game;
+    const others = g.players.filter(p=>p.id!==myId);
+    html += `
+      <div class="eyebrow">Case File ${esc(state.code)} &middot; Round ${g.round}</div>
+      <h1 class="title" style="font-size:24px;">Name the Mole</h1>
+      <div class="sub">${state.votesCount}/${g.players.length} agents have voted.</div>
+      <div class="card">
+        <ul class="vote-list">
+          ${others.map(p=>`<li><button class="${state.myVote===p.id?'selected':''}" onclick="castVote('${p.id}')"><span>${esc(p.name)}</span><span>${state.myVote===p.id?'&#10003; SUSPECTED':'SUSPECT'}</span></button></li>`).join('')}
+        </ul>
+      </div>
+      ${state.isHost ? `<button class="btn-primary" onclick="revealResults()">Reveal Results</button>` : `<div class="hint center">Waiting for the host to reveal results&hellip;</div>`}
+    `;
+  }
+
+  else if(state.screen==='results'){
+    const g = state.game;
+    const {tally,total} = tallyCache;
+    let maxVotes = 0;
+    Object.values(tally).forEach(v=>{ if(v>maxVotes) maxVotes=v; });
+    const topSuspects = Object.keys(tally).filter(id=>tally[id]===maxVotes && maxVotes>0);
+    const caught = maxVotes>0 && topSuspects.length===1 && topSuspects[0]===g.spyId;
+    const spyName = (g.players.find(p=>p.id===g.spyId)||{}).name || 'Unknown';
+    html += `
+      <div class="eyebrow">Case File ${esc(state.code)} &middot; Round ${g.round}</div>
+      <h1 class="title" style="font-size:24px;">Verdict</h1>
+      <div class="folder">
+        <div class="folder-tab">DECLASSIFIED</div>
+        <div class="folder-body" style="cursor:default;">
+          <div class="role-label">The location was</div>
+          <div class="word-big">${esc(g.word)}</div>
+          <div class="role-label" style="margin-top:14px;">The mole was</div>
+          <div class="word-big mole-word">${esc(spyName)}</div>
+          <div class="verdict ${caught?'win':'lose'}">${maxVotes===0?'No votes cast':caught?'MOLE CAUGHT':'MOLE ESCAPED'}</div>
+        </div>
+      </div>
+      <div class="card">
+        <label>Votes (${total}/${g.players.length})</label>
+        ${g.players.map(p=>{
+          const v = tally[p.id]||0;
+          const pct = total>0 ? Math.round(v/total*100) : 0;
+          return `<div class="tally-row"><span style="width:90px;">${esc(p.name)}${p.id===g.spyId?' &#128373;':''}</span><div class="tally-bar"><div class="tally-fill ${p.id===g.spyId?'spy':''}" style="width:${pct}%"></div></div><span style="width:26px;text-align:right;">${v}</span></div>`;
+        }).join('')}
+      </div>
+      ${state.isHost ? `
+        <div class="row">
+          <button class="btn-primary" onclick="newRound()">New Round</button>
+          <button class="btn-ghost" onclick="backToLobby()">Edit Players</button>
+        </div>
+      ` : `<div class="hint center">Waiting for the host to start the next round&hellip;</div>`}
+    `;
+  }
+
+  app.innerHTML = html;
+  wireHomeEvents();
+}
+
+function wireHomeEvents(){
+  const nameInput = document.getElementById('nameInput');
+  if(nameInput){ nameInput.oninput = e=>{ state.name = e.target.value; }; }
+  const createBtn = document.getElementById('createBtn');
+  if(createBtn){ createBtn.onclick = createRoom; }
+  const joinBtn = document.getElementById('joinBtn');
+  const codeInput = document.getElementById('codeInput');
+  if(joinBtn && codeInput){ joinBtn.onclick = ()=>joinRoom(codeInput.value); }
+  const startBtn = document.getElementById('startBtn');
+  if(startBtn){ startBtn.onclick = startGame; }
+}
+
+function setMinutes(m){ state.discussionMinutes = m; render(); }
+function declassify(){ if(!state.revealed){ state.revealed = true; render(); } }
+function leaveToHome(){
+  state = {...state, screen:'home', code:'', isHost:false, game:null, roster:[], revealed:false, myVote:null};
+  render();
+}
+
+window.declassify=declassify; window.setMinutes=setMinutes; window.castVote=castVote;
+window.revealResults=revealResults; window.newRound=newRound; window.backToLobby=backToLobby;
+window.startVoting=startVoting; window.leaveToHome=leaveToHome;
+
+render();
+</script>
+</body>
+</html>
