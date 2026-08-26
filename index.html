@@ -81,6 +81,9 @@
   .verdict{font-family:var(--stamp);font-size:22px;text-align:center;padding:10px 0 2px;}
   .verdict.win{color:#8fae7a;}
   .verdict.lose{color:var(--redacted-2);}
+  .chatlog{max-height:170px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;margin-bottom:10px;padding-right:4px;}
+  .chatmsg{font-size:13px;line-height:1.45;color:var(--text);}
+  .chatmsg .sender{color:var(--gold);font-weight:600;}
   .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--ink-2);border:1px solid var(--redacted-2);color:var(--paper);padding:10px 16px;border-radius:3px;font-size:12px;max-width:90%;text-align:center;z-index:99;}
   a.linklike{color:var(--gold);text-decoration:underline;cursor:pointer;background:none;border:none;font-family:var(--mono);font-size:12px;padding:0;width:auto;display:inline;}
   code.inline{background:var(--ink);padding:2px 6px;border-radius:2px;color:var(--gold);}
@@ -99,7 +102,10 @@
    never in git history.
    ========================================================= */
 
-let gh = null; // {owner, repo, branch, token} -- set via the Connect screen, never persisted
+const GITHUB_OWNER  = "ExtianIgop";
+const GITHUB_REPO   = "SPY";
+const GITHUB_BRANCH = "main";
+let gh = null; // {token} -- set via the Connect screen, never persisted or committed
 
 const WORDS = ["Airport","Bank","Beach Resort","Casino","Circus Tent","Corporate Office","Cathedral","Embassy",
 "Hospital","Hotel Lobby","Military Base","Movie Studio","Cruise Ship","Passenger Train","Pirate Ship",
@@ -112,11 +118,11 @@ function fmtClock(ms){ if(ms<0)ms=0; const s=Math.floor(ms/1000); const m=Math.f
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function b64EncodeUnicode(str){ return btoa(unescape(encodeURIComponent(str))); }
 function b64DecodeUnicode(str){ return decodeURIComponent(escape(atob(str.replace(/\n/g,'')))); }
-function apiBase(){ return `https://api.github.com/repos/${gh.owner}/${gh.repo}/contents/`; }
+function apiBase(){ return `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/`; }
 
 /* ---------- GitHub Contents API helpers ---------- */
 async function ghGetFile(path){
-  const res = await fetch(apiBase()+path+`?ref=${gh.branch}&t=${Date.now()}`, {
+  const res = await fetch(apiBase()+path+`?ref=${GITHUB_BRANCH}&t=${Date.now()}`, {
     headers: { Authorization: `Bearer ${gh.token}`, Accept: 'application/vnd.github+json' }
   });
   if(res.status===404) return {json:null, sha:null};
@@ -129,7 +135,7 @@ async function ghPutFile(path, obj, sha, message){
   const body = {
     message: message || ('update '+path),
     content: b64EncodeUnicode(JSON.stringify(obj)),
-    branch: gh.branch
+    branch: GITHUB_BRANCH
   };
   if(sha) body.sha = sha;
   const res = await fetch(apiBase()+path, {
@@ -179,7 +185,7 @@ function freshRoom(hostName){
   return {
     status:'lobby', hostId:myId, hostName, round:0,
     discussionMs: state.discussionMinutes*60000, players:[], word:null, spyId:null,
-    startTime:null, votingStartTime:null,
+    startTime:null, votingStartTime:null, turnIndex:0, chat:{},
     roster:{}, votes:{}
   };
 }
@@ -240,6 +246,7 @@ async function startGame(){
       current.discussionMs = state.discussionMinutes*60000;
       current.word=word; current.spyId=spyId;
       current.startTime=Date.now(); current.votingStartTime=null;
+      current.turnIndex=0; current.chat=current.chat||{}; current.chat[current.round]=[];
       return current;
     }, {message:'Start round '+state.code});
     if(updated){ state.game=updated; state.revealed=false; state.myVote=null; enterRoundScreen(updated); }
@@ -257,6 +264,7 @@ async function newRound(){
       current.players = entries.map(e=>({id:e.id,name:e.name}));
       current.word=word; current.spyId=spyId;
       current.startTime=Date.now(); current.votingStartTime=null;
+      current.turnIndex=0; current.chat=current.chat||{}; current.chat[current.round]=[];
       return current;
     }, {message:'New round '+state.code});
     if(updated){ state.game=updated; state.revealed=false; state.myVote=null; enterRoundScreen(updated); }
@@ -289,6 +297,34 @@ async function castVote(suspectId){
       return current;
     }, {message:'Vote cast '+state.code});
   } catch(e){ setToast('Could not save your vote: '+e.message); }
+}
+
+function handleSendChat(){
+  const input = document.getElementById('chatInput');
+  if(!input || input.disabled) return;
+  const text = input.value.trim();
+  if(!text) return;
+  input.value = '';
+  sendChatMessage(text);
+}
+
+async function sendChatMessage(text){
+  try{
+    const updated = await ghMutate(roomPath(state.code), current=>{
+      const players = current.players || [];
+      if(players.length===0) return null;
+      const idx = (current.turnIndex||0) % players.length;
+      if(players[idx].id !== myId) return null; // not actually their turn — abort silently
+      const round = current.round;
+      current.chat = current.chat || {};
+      current.chat[round] = current.chat[round] || [];
+      current.chat[round].push({id:genId(), senderId:myId, senderName:players[idx].name, text, ts:Date.now()});
+      current.turnIndex = idx+1;
+      return current;
+    }, {message:'Chat message '+state.code});
+    if(updated){ state.game = updated; render(); }
+    else { setToast("It's not your turn to speak."); }
+  } catch(e){ setToast('Could not send: '+e.message); }
 }
 
 async function revealResults(){
@@ -361,6 +397,30 @@ setInterval(()=>{
 },1000);
 
 /* ---------- render ---------- */
+function renderChat(g){
+  const players = g.players || [];
+  if(players.length===0) return '';
+  const round = g.round;
+  const messages = (g.chat && g.chat[round]) || [];
+  const idx = (g.turnIndex||0) % players.length;
+  const turnPlayer = players[idx];
+  const myTurn = turnPlayer.id===myId;
+  return `
+    <div class="card">
+      <label>Round Table</label>
+      <div class="chatlog">
+        ${messages.length ? messages.slice(-30).map(m=>`<div class="chatmsg"><span class="sender">${esc(m.senderName)}:</span> ${esc(m.text)}</div>`).join('')
+                           : '<div class="hint">No one has spoken yet.</div>'}
+      </div>
+      <div class="hint" style="margin-bottom:8px;">${myTurn ? "It's your turn to speak." : `Waiting on ${esc(turnPlayer.name)}&hellip;`}</div>
+      <div class="row">
+        <input type="text" id="chatInput" placeholder="${myTurn?'Say something…':'Not your turn'}" maxlength="240" ${myTurn?'':'disabled'}>
+        <button class="btn-primary" id="chatSendBtn" style="flex:0 0 84px;" ${myTurn?'':'disabled'}>Send</button>
+      </div>
+    </div>
+  `;
+}
+
 function render(){
   const app = document.getElementById('app');
 
@@ -370,21 +430,9 @@ function render(){
   if(state.screen==='connect'){
     html += `
       <div class="eyebrow">Classified &middot; Field Exercise</div>
-      <h1 class="title" style="font-size:24px;">Connect to your repo</h1>
-      <div class="sub">Every laptop enters these once per session. It's kept only in this browser tab's memory and is never written to any file or commit.</div>
+      <h1 class="title" style="font-size:24px;">Connect to the case files</h1>
+      <div class="sub">Everyone enters this once per session. It's kept only in this browser tab's memory and is never written to any file or commit.</div>
       <div class="card stack">
-        <div>
-          <label>GitHub username</label>
-          <input type="text" id="ghOwner" placeholder="e.g. ExtianIgop" value="${esc(state.ghOwner||'')}">
-        </div>
-        <div>
-          <label>Repository name</label>
-          <input type="text" id="ghRepo" placeholder="e.g. SPY" value="${esc(state.ghRepo||'')}">
-        </div>
-        <div>
-          <label>Branch</label>
-          <input type="text" id="ghBranch" placeholder="main" value="${esc(state.ghBranch||'main')}">
-        </div>
         <div>
           <label>Personal access token</label>
           <input type="password" id="ghToken" placeholder="github_pat_... or ghp_...">
@@ -392,7 +440,7 @@ function render(){
         </div>
       </div>
       <button class="btn-primary" id="connectBtn">Connect</button>
-      <div class="hint center" style="margin-top:10px;">If this fails, double check the token hasn't expired or been revoked — GitHub auto-revokes tokens it detects committed to public repos, so this one should only ever be typed in here, never saved into the file.</div>
+      <div class="hint center" style="margin-top:10px;">If this fails, double check the token hasn't expired or been revoked.</div>
     `;
   }
 
@@ -481,6 +529,7 @@ function render(){
           </div>
         </div>
         <div class="hint center">Only you can see this card. Keep your device out of view.</div>
+        ${renderChat(g)}
         ${state.isHost ? `<button class="btn-ghost" style="margin-top:14px;" onclick="startVoting()">Skip to Voting</button>` : ''}
       `;
     }
@@ -545,11 +594,7 @@ function render(){
 }
 
 function wireHomeEvents(){
-  const ghOwner=document.getElementById('ghOwner'), ghRepo=document.getElementById('ghRepo'),
-        ghBranch=document.getElementById('ghBranch'), ghToken=document.getElementById('ghToken');
-  if(ghOwner) ghOwner.oninput = e=>{ state.ghOwner=e.target.value; };
-  if(ghRepo) ghRepo.oninput = e=>{ state.ghRepo=e.target.value; };
-  if(ghBranch) ghBranch.oninput = e=>{ state.ghBranch=e.target.value; };
+  const ghToken=document.getElementById('ghToken');
   if(ghToken) ghToken.oninput = e=>{ state.ghToken=e.target.value; };
   const connectBtn = document.getElementById('connectBtn');
   if(connectBtn){ connectBtn.onclick = connectToGithub; }
@@ -563,19 +608,23 @@ function wireHomeEvents(){
   if(joinBtn && codeInput){ joinBtn.onclick = ()=>joinRoom(codeInput.value); }
   const startBtn = document.getElementById('startBtn');
   if(startBtn){ startBtn.onclick = startGame; }
+
+  const chatInput = document.getElementById('chatInput');
+  const chatSendBtn = document.getElementById('chatSendBtn');
+  if(chatSendBtn){ chatSendBtn.onclick = handleSendChat; }
+  if(chatInput){ chatInput.onkeydown = e=>{ if(e.key==='Enter'){ handleSendChat(); } }; }
 }
 
 async function connectToGithub(){
-  const owner=(state.ghOwner||'').trim(), repo=(state.ghRepo||'').trim(),
-        branch=(state.ghBranch||'main').trim()||'main', token=(state.ghToken||'').trim();
-  if(!owner||!repo||!token){ setToast('Fill in username, repo, and token.'); return; }
-  gh = {owner, repo, branch, token};
+  const token=(state.ghToken||'').trim();
+  if(!token){ setToast('Paste in the token first.'); return; }
+  gh = {token};
   try{
-    const res = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
+    const res = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}`, {
       headers: { Authorization: `Bearer ${token}`, Accept:'application/vnd.github+json' }
     });
     if(res.status===401){ setToast("Bad credentials — that token was rejected. Check it hasn't expired or been revoked."); gh=null; return; }
-    if(res.status===404){ setToast('Repo not found — check the username and repo name.'); gh=null; return; }
+    if(res.status===404){ setToast('Repo not found — check with whoever set this up.'); gh=null; return; }
     if(!res.ok){ setToast('GitHub error '+res.status+' — check the details and try again.'); gh=null; return; }
   } catch(e){ setToast('Could not reach GitHub: '+e.message); gh=null; return; }
   state.screen='home';
