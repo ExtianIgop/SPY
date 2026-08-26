@@ -112,6 +112,14 @@ const WORDS = ["Airport","Bank","Beach Resort","Casino","Circus Tent","Corporate
 "Polar Station","Police Station","Restaurant","School","Gas Station","Space Station","Submarine",
 "Supermarket","Theater","University","Amusement Park","Zoo","Art Museum","Ski Resort","Wedding Venue"];
 
+// Shown only to the mole, as a decoy list -- deliberately a different set of
+// words from WORDS above, so seeing it gives no hint about the real answer.
+// Rough Tagalog translations -- worth a native-speaker double check before relying on them.
+const MOLE_HINTS = ["Paliparan","Bangko","Dalampasigan","Sugalan","Sirko","Opisina","Katedral","Embahada",
+"Ospital","Bulwagan ng Hotel","Kampo Militar","Istudyo ng Pelikula","Barkong Krusero","Tren","Barko ng Pirata",
+"Estasyon sa Poste","Estasyon ng Pulis","Kainan","Paaralan","Gasolinahan","Estasyong Kalawakan","Submarino",
+"Palengke","Teatro","Unibersidad","Parke ng Libangan","Zoo","Museo","Resort sa Niyebe","Lugar ng Kasal"];
+
 function genId(){return Math.random().toString(36).slice(2,10)+Date.now().toString(36).slice(-4);}
 function genCode(){ const chars='ABCDEFGHJKLMNPQRSTUVWXYZ'; let c='';for(let i=0;i<4;i++)c+=chars[Math.floor(Math.random()*chars.length)]; return c; }
 function fmtClock(ms){ if(ms<0)ms=0; const s=Math.floor(ms/1000); const m=Math.floor(s/60); const r=s%60; return String(m).padStart(2,'0')+':'+String(r).padStart(2,'0'); }
@@ -249,7 +257,7 @@ async function startGame(){
       current.turnIndex=0; current.chat=current.chat||{}; current.chat[current.round]=[];
       return current;
     }, {message:'Start round '+state.code});
-    if(updated){ state.game=updated; state.revealed=false; state.myVote=null; enterRoundScreen(updated); }
+    if(updated){ state.game=updated; state.revealed=false; state.myVote=null; state.votedRound=null; enterRoundScreen(updated); }
   } catch(e){ setToast('Could not start round: '+e.message); }
 }
 
@@ -267,7 +275,7 @@ async function newRound(){
       current.turnIndex=0; current.chat=current.chat||{}; current.chat[current.round]=[];
       return current;
     }, {message:'New round '+state.code});
-    if(updated){ state.game=updated; state.revealed=false; state.myVote=null; enterRoundScreen(updated); }
+    if(updated){ state.game=updated; state.revealed=false; state.myVote=null; state.votedRound=null; enterRoundScreen(updated); }
   } catch(e){ setToast('Could not start round: '+e.message); }
 }
 
@@ -287,15 +295,24 @@ async function startVoting(){
   } catch(e){ setToast('Could not update: '+e.message); }
 }
 
-async function castVote(suspectId){
-  state.myVote = suspectId; render();
+function selectSuspect(suspectId){
+  if(state.votedRound===state.game.round) return; // already submitted, locked
+  state.myVote = suspectId;
+  render();
+}
+
+async function submitVote(){
+  if(!state.myVote){ setToast('Pick someone before submitting.'); return; }
+  const round = state.game.round;
+  const suspectId = state.myVote;
   try{
     await ghMutate(roomPath(state.code), current=>{
-      const round = current.round;
       current.votes[round] = current.votes[round] || {};
       current.votes[round][myId] = suspectId;
       return current;
     }, {message:'Vote cast '+state.code});
+    state.votedRound = round;
+    render();
   } catch(e){ setToast('Could not save your vote: '+e.message); }
 }
 
@@ -344,25 +361,32 @@ function enterRoundScreen(g){
 }
 
 /* ---------- polling ---------- */
+let lastGameSnapshot = null;
+
 async function tick(){
   if(state.screen==='home' || state.screen==='connect' || !state.code) return;
   let g;
   try{ const r = await ghGetFile(roomPath(state.code)); g = r.json; }
   catch(e){ setToast('Lost contact with GitHub: '+e.message); return; }
   if(!g) return;
+
+  const snapshot = JSON.stringify(g);
+  const unchanged = (snapshot === lastGameSnapshot);
+
   state.game = g;
   state.isHost = (g.hostId===myId);
   state.roster = Object.values(g.roster||{}).sort((a,b)=>a.name.localeCompare(b.name));
 
   if(g.status!==state.screen){
-    if(g.status==='briefing'){ state.revealed=false; state.myVote=null; }
+    lastGameSnapshot = snapshot;
+    if(g.status==='briefing'){ state.revealed=false; state.myVote=null; state.votedRound=null; }
     enterRoundScreen(g);
     return;
   }
 
   if(state.screen==='briefing'){
     const elapsed = Date.now()-g.startTime;
-    if(elapsed>=g.discussionMs && state.isHost){ await startVoting(); return; }
+    if(elapsed>=g.discussionMs && state.isHost){ lastGameSnapshot=snapshot; await startVoting(); return; }
   }
 
   if(state.screen==='voting'){
@@ -370,7 +394,7 @@ async function tick(){
     const entries = Object.values(roundVotes);
     state.votesCount = entries.length;
     if(state.isHost && g.players && entries.length>=g.players.length && g.players.length>0){
-      await revealResults(); return;
+      lastGameSnapshot=snapshot; await revealResults(); return;
     }
   }
 
@@ -382,6 +406,8 @@ async function tick(){
     tallyCache = {tally, total: entries.length};
   }
 
+  if(unchanged) return; // nothing actually changed -- skip the re-render entirely
+  lastGameSnapshot = snapshot;
   render();
 }
 setInterval(tick, 5000);
@@ -397,6 +423,19 @@ setInterval(()=>{
 },1000);
 
 /* ---------- render ---------- */
+function renderChatHistory(g){
+  const messages = (g.chat && g.chat[g.round]) || [];
+  return `
+    <div class="card">
+      <label>Round Table &mdash; What Was Said</label>
+      <div class="chatlog">
+        ${messages.length ? messages.map(m=>`<div class="chatmsg"><span class="sender">${esc(m.senderName)}:</span> ${esc(m.text)}</div>`).join('')
+                           : '<div class="hint">No one said anything this round.</div>'}
+      </div>
+    </div>
+  `;
+}
+
 function renderChat(g){
   const players = g.players || [];
   if(players.length===0) return '';
@@ -517,7 +556,7 @@ function render(){
                 <div class="word-big ${amSpy?'mole-word':''}">${amSpy?'MOLE':esc(g.word)}</div>
                 ${amSpy ? `
                   <div class="hint" style="margin-top:6px;">You don't know the location. Listen closely, bluff convincingly, and try to blend in.</div>
-                  <div class="grid-locs">${WORDS.map(w=>`<span>${esc(w)}</span>`).join('')}</div>
+                  <div class="grid-locs">${MOLE_HINTS.map(w=>`<span>${esc(w)}</span>`).join('')}</div>
                 ` : `<div class="hint" style="margin-top:6px;">Ask each other questions about the location without saying it outright. Find whoever doesn't know it.</div>`}
               </div>
             ` : `
@@ -538,17 +577,33 @@ function render(){
   else if(state.screen==='voting'){
     const g = state.game;
     const others = g.players.filter(p=>p.id!==myId);
-    html += `
-      <div class="eyebrow">Case File ${esc(state.code)} &middot; Round ${g.round}</div>
-      <h1 class="title" style="font-size:24px;">Name the Mole</h1>
-      <div class="sub">${state.votesCount}/${g.players.length} agents have voted.</div>
-      <div class="card">
-        <ul class="vote-list">
-          ${others.map(p=>`<li><button class="${state.myVote===p.id?'selected':''}" onclick="castVote('${p.id}')"><span>${esc(p.name)}</span><span>${state.myVote===p.id?'&#10003; SUSPECTED':'SUSPECT'}</span></button></li>`).join('')}
-        </ul>
-      </div>
-      ${state.isHost ? `<button class="btn-primary" onclick="revealResults()">Reveal Results</button>` : `<div class="hint center">Waiting for the host to reveal results&hellip;</div>`}
-    `;
+    const alreadyVoted = state.votedRound===g.round;
+
+    if(alreadyVoted){
+      html += `
+        <div class="eyebrow">Case File ${esc(state.code)} &middot; Round ${g.round}</div>
+        <h1 class="title" style="font-size:24px;">Vote Locked In</h1>
+        <div class="sub">${state.votesCount}/${g.players.length} agents have voted.</div>
+        <div class="card center" style="padding:30px 20px;">
+          <div class="hint" style="font-size:14px;color:var(--paper);">Waiting for the rest of the table&hellip;</div>
+        </div>
+        ${renderChatHistory(g)}
+      `;
+    } else {
+      html += `
+        <div class="eyebrow">Case File ${esc(state.code)} &middot; Round ${g.round}</div>
+        <h1 class="title" style="font-size:24px;">Name the Mole</h1>
+        <div class="sub">${state.votesCount}/${g.players.length} agents have voted.</div>
+        ${renderChatHistory(g)}
+        <div class="card">
+          <label>Cast Your Suspicion</label>
+          <ul class="vote-list">
+            ${others.map(p=>`<li><button class="${state.myVote===p.id?'selected':''}" onclick="selectSuspect('${p.id}')"><span>${esc(p.name)}</span><span>${state.myVote===p.id?'&#10003; SELECTED':'SUSPECT'}</span></button></li>`).join('')}
+          </ul>
+        </div>
+        <button class="btn-primary" id="submitVoteBtn" ${state.myVote?'':'disabled'}>Submit Vote</button>
+      `;
+    }
   }
 
   else if(state.screen==='results'){
@@ -589,7 +644,18 @@ function render(){
     `;
   }
 
+  const prevChatInput = document.getElementById('chatInput');
+  const prevChatValue = prevChatInput ? prevChatInput.value : '';
+  const prevChatFocused = prevChatInput && document.activeElement===prevChatInput;
+  const prevSelStart = prevChatFocused ? prevChatInput.selectionStart : null;
+
   app.innerHTML = html;
+
+  const newChatInput = document.getElementById('chatInput');
+  if(newChatInput && prevChatValue){
+    newChatInput.value = prevChatValue;
+    if(prevChatFocused){ newChatInput.focus(); if(prevSelStart!=null) newChatInput.setSelectionRange(prevSelStart, prevSelStart); }
+  }
   wireHomeEvents();
 }
 
@@ -613,6 +679,9 @@ function wireHomeEvents(){
   const chatSendBtn = document.getElementById('chatSendBtn');
   if(chatSendBtn){ chatSendBtn.onclick = handleSendChat; }
   if(chatInput){ chatInput.onkeydown = e=>{ if(e.key==='Enter'){ handleSendChat(); } }; }
+
+  const submitVoteBtn = document.getElementById('submitVoteBtn');
+  if(submitVoteBtn){ submitVoteBtn.onclick = submitVote; }
 }
 
 async function connectToGithub(){
@@ -638,7 +707,7 @@ function leaveToHome(){
   render();
 }
 
-window.declassify=declassify; window.setMinutes=setMinutes; window.castVote=castVote;
+window.declassify=declassify; window.setMinutes=setMinutes; window.selectSuspect=selectSuspect; window.submitVote=submitVote;
 window.revealResults=revealResults; window.newRound=newRound; window.backToLobby=backToLobby;
 window.startVoting=startVoting; window.leaveToHome=leaveToHome;
 
