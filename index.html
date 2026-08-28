@@ -704,7 +704,7 @@ function render(){
         <ul class="manifest">
           ${roster.map((p,i)=>{
             const isAway = p.lastSeen && (Date.now()-p.lastSeen) > AWAY_MS;
-            return `<li><span class="num">${String(i+1).padStart(3,'0')}</span>${esc(p.name)}${isAway?' <span style="color:var(--steel);font-size:11px;">(inactive)</span>':''}${p.id===g.hostId?'<span class="host-tag">HOST</span>':''}${p.id===myId?' <span style="color:var(--gold)">(you)</span>':''}</li>`;
+            return `<li><span class="num">${String(i+1).padStart(3,'0')}</span>${esc(p.name)}${isAway?' <span style="color:var(--steel);font-size:11px;">(inactive)</span>':''}${p.id===myId?' <span style="color:var(--gold)">(you)</span>':''}</li>`;
           }).join('') || '<li class="hint">Waiting for agents to check in&hellip;</li>'}
         </ul>
         <div class="hint" style="margin-top:8px;">Agents who go quiet for about a minute are removed from the roster automatically.</div>
